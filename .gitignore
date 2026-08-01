@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+media/
+staticfiles/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# PageIndex workspace artifacts (repo clone is kept)
+backend/pageindex_repo/**/__pycache__/
+backend/media/pageindex_workspace/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Testing / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+.npm-cache/

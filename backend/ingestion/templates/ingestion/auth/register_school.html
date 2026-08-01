@@ -1,0 +1,29 @@
+{% extends "ingestion/base.html" %}
+{% block title %}Create school — Education AI{% endblock %}
+{% block content %}
+<p class="brand">Onboarding</p>
+<h1>Register your school</h1>
+<p class="sub">Creates the school and your admin account. You’ll get a join code to share with teachers and students.</p>
+<div class="card">
+  <form method="post">
+    {% csrf_token %}
+    <label for="id_school_name">School name</label>
+    {{ form.school_name }}{{ form.school_name.errors }}
+    <label for="id_full_name">Your name</label>
+    {{ form.full_name }}{{ form.full_name.errors }}
+    <label for="id_username">Admin username</label>
+    {{ form.username }}{{ form.username.errors }}
+    <label for="id_email">Email</label>
+    {{ form.email }}{{ form.email.errors }}
+    <label for="id_password">Password</label>
+    {{ form.password }}{{ form.password.errors }}
+    <label for="id_password_confirm">Confirm password</label>
+    {{ form.password_confirm }}{{ form.password_confirm.errors }}
+    <button class="btn" type="submit">Create school</button>
+  </form>
+</div>
+<p class="links">
+  Already registered? <a href="{% url 'login' %}">Sign in</a>
+  · Joining an existing school? <a href="{% url 'register_join' %}">Join with code</a>
+</p>
+{% endblock %}

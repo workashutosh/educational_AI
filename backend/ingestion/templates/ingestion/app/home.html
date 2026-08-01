@@ -1,0 +1,64 @@
+{% extends "ingestion/base.html" %}
+{% block title %}Home — {{ school.name }}{% endblock %}
+{% block shell_class %}wide{% endblock %}
+{% block content %}
+<div class="topbar">
+  <div>
+    <p class="brand">{{ school.name }}</p>
+    <h1>Hello{% if member.user.first_name %}, {{ member.user.first_name }}{% endif %}</h1>
+    <p class="meta">Signed in as <strong>{{ member.user.username }}</strong> · role <strong>{{ member.get_role_display }}</strong></p>
+  </div>
+  <a class="btn inline secondary" href="{% url 'logout' %}">Sign out</a>
+</div>
+
+{% if can_manage %}
+<div class="card" style="margin-bottom:1rem">
+  <h3 style="margin:0 0 0.35rem">School join code</h3>
+  <p class="meta" style="margin:0">Share this with teachers and students so they can register.</p>
+  <p style="margin:0.75rem 0 0;font-size:1.4rem"><span class="code">{{ school.join_code }}</span></p>
+</div>
+{% endif %}
+
+<div class="grid">
+  <a class="tile" href="{% url 'ask-test' %}">
+    <h3>Ask notes</h3>
+    <p class="meta">Chat with indexed subject notes (KaTeX math + citations).</p>
+  </a>
+  {% if can_upload %}
+  <a class="tile" href="/api/docs/">
+    <h3>API docs</h3>
+    <p class="meta">Upload documents &amp; manage buckets via the REST API.</p>
+  </a>
+  {% endif %}
+  {% if can_manage %}
+  <a class="tile" href="/admin/">
+    <h3>Admin console</h3>
+    <p class="meta">Grant bucket access, manage members and documents.</p>
+  </a>
+  {% endif %}
+</div>
+
+<section style="margin-top:1.5rem">
+  <h2 style="font-size:1.1rem;margin:0 0 0.5rem">Your buckets</h2>
+  {% if buckets %}
+  <div class="grid">
+    {% for b in buckets %}
+    <div class="tile">
+      <h3>{{ b.name }}{% if b.grade_level %} · {{ b.grade_level }}{% endif %}</h3>
+      <p class="meta">Bucket #{{ b.id }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="meta">No buckets yet.
+    {% if can_manage %}Create one in Admin or via <code>POST /api/admin/buckets/</code>.{% else %}Ask an admin to grant you access.{% endif %}
+  </p>
+  {% endif %}
+</section>
+
+<details style="margin-top:1.5rem" class="card">
+  <summary style="cursor:pointer;font-family:'Avenir Next','Segoe UI',sans-serif;font-weight:600">API token</summary>
+  <p class="meta">Use as <code>Authorization: Token …</code> for agent or script clients.</p>
+  <div class="token-box">{{ api_token }}</div>
+</details>
+{% endblock %}

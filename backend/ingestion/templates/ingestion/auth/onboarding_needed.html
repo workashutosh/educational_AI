@@ -1,0 +1,8 @@
+{% extends "ingestion/base.html" %}
+{% block title %}Finish setup{% endblock %}
+{% block content %}
+<p class="brand">Setup needed</p>
+<h1>No school membership</h1>
+<p class="sub">Your login works, but you’re not attached to a school yet. Sign out and use join-school registration, or ask a platform operator to attach you.</p>
+<a class="btn" href="{% url 'logout' %}">Sign out</a>
+{% endblock %}

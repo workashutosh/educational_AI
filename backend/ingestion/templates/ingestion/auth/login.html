@@ -1,0 +1,26 @@
+{% extends "ingestion/base.html" %}
+{% block title %}Sign in — Education AI{% endblock %}
+{% block content %}
+<p class="brand">Education AI</p>
+<h1>Sign in</h1>
+<p class="sub">Teachers, managers, students, and school admins use the same login.</p>
+<div class="card">
+  <form method="post" action="">
+    {% csrf_token %}
+    {% if request.GET.next %}<input type="hidden" name="next" value="{{ request.GET.next }}">{% endif %}
+    <label for="id_username">Username</label>
+    {{ form.username }}
+    {{ form.username.errors }}
+    <label for="id_password">Password</label>
+    {{ form.password }}
+    {{ form.password.errors }}
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+</div>
+<p class="links">
+  New school?
+  <a href="{% url 'register_school' %}">Register &amp; onboard</a>
+  · Already have a join code?
+  <a href="{% url 'register_join' %}">Join school</a>
+</p>
+{% endblock %}

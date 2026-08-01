@@ -1,0 +1,505 @@
+"""
+Document parsing → structure-annotated markdown + page count.
+
+Output contract (consumed by chunk_service.chunk_markdown):
+  - Heading lines use standard markdown ATX syntax: "#".."######"
+  - Page/slide boundaries are marked with a sentinel line: "<!--PAGE:N-->"
+  - Everything else is body text, grouped into paragraphs
+
+Native text extract for digital PDFs (PyMuPDF) infers heading levels from
+this specific document's own font-size distribution — no hardcoded
+thresholds, so it adapts to any style/size/layout. DOCX/PPTX use their
+native heading/title structures. Scanned PDFs/images fall back to the
+hosted PaddleOCR-VL API (AI Studio), which already returns leveled markdown.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif"}
+PDF_EXTS = {".pdf"}
+DOCX_EXTS = {".docx"}
+PPTX_EXTS = {".pptx"}
+TEXT_EXTS = {".md", ".markdown", ".txt"}
+
+# If average extracted chars/page is below this, treat PDF as scanned → OCR.
+_MIN_CHARS_PER_PAGE = 40
+
+# Heading-candidate filters — kept generous since real headings vary a lot in
+# length/punctuation across document styles; these mainly reject page-number
+# artifacts and long sentences that merely happen to render in a larger font.
+_MAX_HEADING_CHARS = 160
+_MAX_HEADING_LEVEL = 6  # markdown ATX max ("######")
+
+# Math-heavy PDFs (LaTeX-compiled textbooks especially) render pieces of
+# equations — large brace/bracket continuations above all — using
+# font-specific Private Use Area glyphs that carry no portable meaning.
+# Strip them; they're never legitimate content in any well-formed document.
+_PUA_RE = re.compile("[\uE000-\uF8FF]")
+
+# Running headers/footers are near-always full words/phrases (book title,
+# chapter name) — never this short. Keeping the floor here well above 1-2
+# chars is what protects legitimate, frequently-recurring short math tokens
+# ("sin", "cos", "lim", "dx") from being misclassified as boilerplate.
+_MIN_BOILERPLATE_CHARS = 8
+
+
+@dataclass
+class ParseResult:
+    markdown: str
+    page_count: int | None
+    output_path: Path
+
+
+def parse_document(source_path: str | Path, output_dir: str | Path) -> ParseResult:
+    """
+    Parse a PDF/DOCX/PPTX/image/text file into structure-annotated markdown
+    and write it to output_dir.
+    """
+    source_path = Path(source_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source file not found: {source_path}")
+
+    ext = source_path.suffix.lower()
+
+    if ext in PDF_EXTS:
+        markdown, page_count = _parse_pdf(source_path)
+    elif ext in IMAGE_EXTS:
+        markdown, page_count = _parse_image(source_path), 1
+    elif ext in DOCX_EXTS:
+        markdown, page_count = _parse_docx(source_path), None
+    elif ext in PPTX_EXTS:
+        markdown, page_count = _parse_pptx(source_path)
+    elif ext in TEXT_EXTS:
+        markdown, page_count = source_path.read_text(encoding="utf-8", errors="replace"), None
+    else:
+        raise ValueError(
+            f"Unsupported file type '{ext}'. "
+            "Supported: PDF, DOCX, PPTX, PNG/JPG/TIFF/BMP/WEBP, MD/TXT."
+        )
+
+    markdown = _normalize_markdown(markdown)
+    if not markdown.strip():
+        raise ValueError("Parser produced empty output for this file")
+
+    out_path = output_dir / f"{source_path.stem}.md"
+    out_path.write_text(markdown, encoding="utf-8")
+    logger.info("Parsed %s → %s (pages=%s)", source_path.name, out_path.name, page_count)
+    return ParseResult(markdown=markdown, page_count=page_count, output_path=out_path)
+
+
+# --- PDF -----------------------------------------------------------------------
+
+
+@dataclass
+class _Segment:
+    text: str
+    size: float
+    bold: bool
+    continues_line: bool = False  # size-change continuation of the previous
+    # segment's own physical PDF text line (not a new line/paragraph) — lets
+    # us recognize "numeral/drop-cap run, then bold title text" as one heading
+    # even though the two runs differ in size.
+
+
+def _extract_page_segments(page) -> list[_Segment]:
+    """
+    Reading-order text segments with font size/weight, from PyMuPDF's dict
+    layout. Segments are split wherever a PDF text line's own spans change
+    size — this matters because textbook layouts routinely fuse an inline
+    subsection number+title with the start of its paragraph on one physical
+    line (e.g. "1.2  ELECTRIC CHARGE Historically the credit..."); splitting
+    at the span-size boundary recovers the heading instead of losing it into
+    the paragraph body.
+    """
+    segments: list[_Segment] = []
+    raw = page.get_text("dict")
+    # PyMuPDF's block order follows the PDF content stream, not necessarily
+    # visual layout — decorative elements (e.g. a sidebar chapter-title strip)
+    # are often drawn out of band and can land anywhere in that stream. Sort
+    # top-to-bottom, then left-to-right so heading detection sees the title
+    # before the body text that follows it, not after.
+    blocks = sorted(
+        raw.get("blocks", []),
+        key=lambda b: (round(b.get("bbox", (0, 0, 0, 0))[1]), b.get("bbox", (0, 0, 0, 0))[0]),
+    )
+    for block in blocks:
+        for line in block.get("lines", []):
+            run_text: list[str] = []
+            run_size: float | None = None
+            run_bold = False
+            first_run_in_line = True
+            for span in line.get("spans", []):
+                text = _PUA_RE.sub("", span.get("text", ""))
+                if not text:
+                    continue
+                size = round(float(span.get("size", 0)), 1)
+                bold = bool(span.get("flags", 0) & (1 << 4))
+                if run_size is not None and size != run_size:
+                    joined = "".join(run_text).strip()
+                    if joined:
+                        segments.append(
+                            _Segment(
+                                text=joined,
+                                size=run_size,
+                                bold=run_bold,
+                                continues_line=not first_run_in_line,
+                            )
+                        )
+                        first_run_in_line = False
+                    run_text, run_bold = [], False
+                run_text.append(text)
+                run_size = size
+                run_bold = run_bold or bold
+            joined = "".join(run_text).strip()
+            if joined:
+                segments.append(
+                    _Segment(
+                        text=joined,
+                        size=run_size or 0,
+                        bold=run_bold,
+                        continues_line=not first_run_in_line,
+                    )
+                )
+    return segments
+
+
+def _detect_boilerplate(pages: list[list[_Segment]]) -> set[str]:
+    """
+    Running headers/footers (book/chapter name, folio decorations) repeat
+    verbatim across many pages — unlike real headings, which are specific to
+    one section. Flag any short text appearing on an unusually large share of
+    pages so it's dropped everywhere rather than misread as structure.
+    """
+    total_pages = len(pages)
+    if total_pages < 4:
+        return set()
+
+    page_texts = [
+        {
+            seg.text.strip()
+            for seg in segs
+            if _MIN_BOILERPLATE_CHARS <= len(seg.text.strip()) <= 60
+        }
+        for segs in pages
+    ]
+    counts: Counter[str] = Counter()
+    for texts in page_texts:
+        counts.update(texts)
+
+    threshold = max(3, int(total_pages * 0.15))
+    return {text for text, count in counts.items() if count >= threshold}
+
+
+def _is_page_number_artifact(text: str) -> bool:
+    t = text.strip()
+    return t.isdigit() and len(t) <= 4
+
+
+def _infer_heading_sizes(pages: list[list[_Segment]]) -> dict[float, int]:
+    """
+    Cluster this document's own font sizes into heading levels. Purely
+    data-driven (char-weighted mode = body text; larger sizes above it =
+    heading candidates) so it adapts to any PDF's style without tuning.
+
+    Sizes whose segments average under 3 characters are excluded even if
+    larger than body text — that pattern is decorative drop-cap initials,
+    not real heading content, and would otherwise register as a bogus
+    single-letter "heading level".
+    """
+    char_count_by_size: Counter[float] = Counter()
+    segment_count_by_size: Counter[float] = Counter()
+    for segments in pages:
+        for seg in segments:
+            char_count_by_size[seg.size] += len(seg.text)
+            segment_count_by_size[seg.size] += 1
+
+    if not char_count_by_size:
+        return {}
+
+    body_size = char_count_by_size.most_common(1)[0][0]
+    candidate_sizes = sorted(
+        (
+            size
+            for size in char_count_by_size
+            if size > body_size * 1.05
+            and char_count_by_size[size] / segment_count_by_size[size] >= 3
+        ),
+        reverse=True,
+    )
+    # Every qualifying size becomes its own level (not just the top few) —
+    # documents with many distinct tiers just clamp to h6 rather than losing
+    # the deeper tiers entirely.
+    return {size: min(rank, _MAX_HEADING_LEVEL) for rank, size in enumerate(candidate_sizes, start=1)}
+
+
+def _looks_like_heading(seg: _Segment, level: int | None) -> bool:
+    if level is None:
+        return False
+    text = seg.text.strip()
+    if not text or len(text) > _MAX_HEADING_CHARS:
+        return False
+    if _is_page_number_artifact(text) or len(text) < 3:
+        return False
+    return True
+
+
+def _segments_to_markdown(segments: list[_Segment], heading_levels: dict[float, int]) -> str:
+    out: list[str] = []
+    paragraph: list[str] = []
+    pending: tuple[int, list[str]] | None = None  # (level, [text, ...]) — merges
+    # consecutive same-level heading segments, e.g. a title wrapped over two
+    # lines, into a single heading instead of two sibling headings that would
+    # otherwise clobber each other in the heading stack.
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            out.append(" ".join(paragraph))
+            paragraph.clear()
+
+    def flush_heading() -> None:
+        nonlocal pending
+        if pending:
+            level, parts = pending
+            out.append(f"{'#' * level} {' '.join(parts)}")
+            pending = None
+
+    for seg in segments:
+        level = heading_levels.get(seg.size)
+        is_heading = _looks_like_heading(seg, level)
+
+        if is_heading and pending and (seg.continues_line or level == pending[0]):
+            # Same physical PDF line as the open heading (covers "1.2  TITLE"
+            # layouts where the numeral/drop-cap differs in size from the
+            # title text following it on the same line), or a same-level
+            # heading continuing on the next line (a title wrapped over two
+            # lines) — either way, still part of the same heading.
+            pending[1].append(seg.text.strip())
+            continue
+
+        if is_heading:
+            flush_paragraph()
+            flush_heading()
+            pending = (level, [seg.text.strip()])
+            continue
+
+        flush_heading()
+        paragraph.append(seg.text)
+    flush_heading()
+    flush_paragraph()
+    return "\n\n".join(out)
+
+
+def _parse_pdf(path: Path) -> tuple[str, int]:
+    import fitz  # PyMuPDF (already required by PageIndex)
+
+    doc = fitz.open(path)
+    page_count = doc.page_count
+    pages_segments = [_extract_page_segments(page) for page in doc]
+    doc.close()
+
+    total_chars = sum(len(seg.text) for segs in pages_segments for seg in segs)
+    avg = total_chars / max(page_count, 1)
+
+    if avg < _MIN_CHARS_PER_PAGE:
+        logger.info(
+            "PDF %s looks scanned (%.0f chars/page) — running PaddleOCR-VL",
+            path.name,
+            avg,
+        )
+        ocr_pages = _ocr_via_paddleocr_vl(path)
+        parts = [f"<!--PAGE:{i}-->\n{text}" for i, text in enumerate(ocr_pages, start=1)]
+        if len(ocr_pages) != page_count:
+            logger.warning(
+                "PaddleOCR-VL returned %d pages, PyMuPDF counted %d for %s",
+                len(ocr_pages),
+                page_count,
+                path.name,
+            )
+        return "\n\n".join(parts), page_count
+
+    boilerplate = _detect_boilerplate(pages_segments)
+    pages_segments = [
+        [
+            seg
+            for seg in segs
+            if seg.text.strip() not in boilerplate and not _is_page_number_artifact(seg.text)
+        ]
+        for segs in pages_segments
+    ]
+
+    heading_levels = _infer_heading_sizes(pages_segments)
+    parts = [
+        f"<!--PAGE:{i}-->\n{_segments_to_markdown(segs, heading_levels)}"
+        for i, segs in enumerate(pages_segments, start=1)
+    ]
+    return "\n\n".join(parts), page_count
+
+
+def _parse_image(path: Path) -> str:
+    pages = _ocr_via_paddleocr_vl(path)
+    text = (pages[0] if pages else "").strip()
+    title = path.stem.replace("_", " ").replace("-", " ")
+    body = text or f"# {title}"
+    return f"<!--PAGE:1-->\n{body}"
+
+
+# --- DOCX / PPTX -----------------------------------------------------------------
+
+
+def _parse_docx(path: Path) -> str:
+    """Word has no fixed 'pages' pre-render, so chunks from this source carry no
+    page numbers — heading structure (native Heading N styles) still applies."""
+    from docx import Document as DocxDocument
+
+    doc = DocxDocument(str(path))
+    blocks: list[str] = []
+    for para in doc.paragraphs:
+        text = (para.text or "").strip()
+        if not text:
+            continue
+        style = (para.style.name or "") if para.style else ""
+        if style.startswith("Heading"):
+            level = 1
+            for ch in style:
+                if ch.isdigit():
+                    level = int(ch)
+                    break
+            level = max(1, min(level, 6))
+            blocks.append(f"{'#' * level} {text}")
+        else:
+            blocks.append(text)
+    return "\n\n".join(blocks)
+
+
+def _parse_pptx(path: Path) -> tuple[str, int]:
+    from pptx import Presentation
+
+    prs = Presentation(str(path))
+    parts: list[str] = []
+    for i, slide in enumerate(prs.slides, start=1):
+        title_shape = slide.shapes.title
+        title = (title_shape.text or "").strip() if title_shape else ""
+        parts.append(f"<!--PAGE:{i}-->\n" + (f"## {title}" if title else f"## Slide {i}"))
+
+        title_id = title_shape.shape_id if title_shape else None
+        body_texts = [
+            shape.text.strip()
+            for shape in slide.shapes
+            if shape.shape_id != title_id and hasattr(shape, "text") and shape.text and shape.text.strip()
+        ]
+        if body_texts:
+            parts.append("\n\n".join(body_texts))
+    return "\n\n".join(parts), len(prs.slides)
+
+
+# --- PaddleOCR-VL hosted API (AI Studio) --------------------------------------
+# Async job API: submit a file → poll job status → download a JSONL result with
+# one layout-parsed markdown page per line (headings already leveled by the
+# model). Runs entirely on AI Studio's infrastructure — no local paddle install.
+_JOB_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
+_POLL_INTERVAL_S = 5
+_JOB_TIMEOUT_S = 600
+
+
+def _paddleocr_vl_headers() -> dict:
+    token = getattr(settings, "PADDLEOCR_VL_TOKEN", "")
+    if not token:
+        raise RuntimeError(
+            "PADDLEOCR_VL_TOKEN is not set — required for scanned PDF/image OCR."
+        )
+    return {"Authorization": f"bearer {token}"}
+
+
+def _ocr_via_paddleocr_vl(path: Path) -> list[str]:
+    """
+    Submit a file (PDF or image) to the PaddleOCR-VL hosted API and return one
+    markdown string per extracted page, in order.
+    """
+    import requests
+
+    model = getattr(settings, "PADDLEOCR_VL_MODEL", "PaddleOCR-VL-1.6")
+    optional_payload = {
+        "useDocOrientationClassify": False,
+        "useDocUnwarping": False,
+        "useChartRecognition": False,
+    }
+
+    with open(path, "rb") as f:
+        files = {"file": (path.name, f)}
+        data = {"model": model, "optionalPayload": json.dumps(optional_payload)}
+        response = requests.post(
+            _JOB_URL, headers=_paddleocr_vl_headers(), data=data, files=files, timeout=120
+        )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"PaddleOCR-VL job submission failed ({response.status_code}): {response.text}"
+        )
+    job_id = response.json()["data"]["jobId"]
+    logger.info("PaddleOCR-VL job submitted for %s (job_id=%s)", path.name, job_id)
+
+    jsonl_url = _poll_paddleocr_vl_job(job_id)
+    return _download_paddleocr_vl_pages(jsonl_url)
+
+
+def _poll_paddleocr_vl_job(job_id: str) -> str:
+    import requests
+
+    deadline = time.monotonic() + _JOB_TIMEOUT_S
+    while time.monotonic() < deadline:
+        resp = requests.get(
+            f"{_JOB_URL}/{job_id}", headers=_paddleocr_vl_headers(), timeout=30
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"PaddleOCR-VL job status check failed ({resp.status_code}): {resp.text}"
+            )
+        data = resp.json()["data"]
+        state = data.get("state")
+
+        if state == "done":
+            return data["resultUrl"]["jsonUrl"]
+        if state == "failed":
+            raise RuntimeError(f"PaddleOCR-VL job failed: {data.get('errorMsg')}")
+
+        logger.info("PaddleOCR-VL job %s: %s", job_id, state)
+        time.sleep(_POLL_INTERVAL_S)
+
+    raise RuntimeError(f"PaddleOCR-VL job {job_id} timed out after {_JOB_TIMEOUT_S}s")
+
+
+def _download_paddleocr_vl_pages(jsonl_url: str) -> list[str]:
+    import requests
+
+    resp = requests.get(jsonl_url, timeout=120)
+    resp.raise_for_status()
+
+    pages: list[str] = []
+    for line in resp.text.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        result = json.loads(line)["result"]
+        for page_result in result.get("layoutParsingResults", []):
+            pages.append(page_result.get("markdown", {}).get("text", ""))
+    return pages
+
+
+def _normalize_markdown(text: str) -> str:
+    # Collapse excessive blank lines; keep heading/page-marker lines intact.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip() + "\n"

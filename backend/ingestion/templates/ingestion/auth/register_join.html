@@ -1,0 +1,31 @@
+{% extends "ingestion/base.html" %}
+{% block title %}Join school — Education AI{% endblock %}
+{% block content %}
+<p class="brand">Join</p>
+<h1>Join your school</h1>
+<p class="sub">Ask your school admin for the join code. Teachers can upload notes after they’re granted bucket access; students can chat on granted buckets.</p>
+<div class="card">
+  <form method="post">
+    {% csrf_token %}
+    <label for="id_join_code">School join code</label>
+    {{ form.join_code }}{{ form.join_code.errors }}
+    <label for="id_role">I am a</label>
+    {{ form.role }}{{ form.role.errors }}
+    <label for="id_full_name">Your name</label>
+    {{ form.full_name }}{{ form.full_name.errors }}
+    <label for="id_username">Username</label>
+    {{ form.username }}{{ form.username.errors }}
+    <label for="id_email">Email</label>
+    {{ form.email }}{{ form.email.errors }}
+    <label for="id_password">Password</label>
+    {{ form.password }}{{ form.password.errors }}
+    <label for="id_password_confirm">Confirm password</label>
+    {{ form.password_confirm }}{{ form.password_confirm.errors }}
+    <button class="btn" type="submit">Create account</button>
+  </form>
+</div>
+<p class="links">
+  Need to create a school? <a href="{% url 'register_school' %}">School onboarding</a>
+  · <a href="{% url 'login' %}">Sign in</a>
+</p>
+{% endblock %}
