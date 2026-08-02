@@ -67,6 +67,35 @@ class AskRequestSerializer(serializers.Serializer):
     session_id = serializers.IntegerField(required=False, allow_null=True)
 
 
+class GeneratePptxRequestSerializer(serializers.Serializer):
+    prompt = serializers.CharField(max_length=2000)
+    bucket_id = serializers.IntegerField()
+    slide_count = serializers.IntegerField(required=False, default=8, min_value=3, max_value=15)
+
+
+class PptxSlideSerializer(serializers.Serializer):
+    heading = serializers.CharField(max_length=200)
+    bullets = serializers.ListField(
+        child=serializers.CharField(max_length=500),
+        allow_empty=False,
+        max_length=10,
+    )
+    notes = serializers.CharField(required=False, allow_blank=True, max_length=1000, default="")
+
+
+class DownloadPptxRequestSerializer(serializers.Serializer):
+    bucket_id = serializers.IntegerField()
+    title = serializers.CharField(max_length=200)
+    slides = PptxSlideSerializer(many=True)
+
+    def validate_slides(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one slide is required.")
+        if len(value) > 20:
+            raise serializers.ValidationError("Too many slides (max 20).")
+        return value
+
+
 class GrantAccessSerializer(serializers.Serializer):
     member_id = serializers.IntegerField(required=False)
     teacher_id = serializers.IntegerField(required=False)  # legacy alias
@@ -104,9 +133,19 @@ TeacherAccessSerializer = BucketAccessSerializer
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):
+    bucket_name = serializers.CharField(source="bucket.name", read_only=True)
+
     class Meta:
         model = ChatSession
-        fields = ("id", "bucket", "member", "title", "created_at", "updated_at")
+        fields = (
+            "id",
+            "bucket",
+            "bucket_name",
+            "member",
+            "title",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
 
 

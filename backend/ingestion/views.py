@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from rest_framework import status
@@ -37,6 +38,8 @@ from .serializers import (
     DocumentSerializer,
     DocumentStatusSerializer,
     DocumentUploadSerializer,
+    DownloadPptxRequestSerializer,
+    GeneratePptxRequestSerializer,
     GrantAccessSerializer,
     QueryRequestSerializer,
     SubjectBucketCreateSerializer,
@@ -44,6 +47,11 @@ from .serializers import (
 )
 from .services import find_indexed_duplicate, sha256_of_uploaded_file
 from .services.answer_service import answer_question
+from .services.pptx_service import (
+    PptxGenerationError,
+    generate_pptx_outline,
+    pptx_from_outline,
+)
 from .services.retrieval_service import search_bucket
 from .tasks import process_document
 
@@ -356,6 +364,81 @@ class AskView(APIView):
                 "session": session_payload,
             }
         )
+
+
+class GeneratePptxView(APIView):
+    """POST /api/generate-pptx/ — RAG + Groq → JSON outline for in-app preview."""
+
+    permission_classes = [IsSchoolMember, HasBucketAccess]
+
+    def get_bucket_id(self):
+        return self.request.data.get("bucket_id")
+
+    def post(self, request):
+        serializer = GeneratePptxRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        bucket = getattr(request, "bucket", None) or get_object_or_404(
+            SubjectBucket, pk=serializer.validated_data["bucket_id"]
+        )
+        prompt = serializer.validated_data["prompt"]
+        slide_count = serializer.validated_data.get("slide_count", 8)
+
+        try:
+            result = generate_pptx_outline(
+                bucket.id, prompt=prompt, slide_count=slide_count
+            )
+        except PptxGenerationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except RuntimeError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(
+            {
+                "bucket_id": bucket.id,
+                "prompt": result.prompt,
+                "title": result.title,
+                "model": result.model,
+                "slide_count": len(result.slides),
+                "slides": result.slides,
+            }
+        )
+
+
+class DownloadPptxView(APIView):
+    """POST /api/generate-pptx/download/ — build .pptx from a previewed outline."""
+
+    permission_classes = [IsSchoolMember, HasBucketAccess]
+
+    def get_bucket_id(self):
+        return self.request.data.get("bucket_id")
+
+    def post(self, request):
+        serializer = DownloadPptxRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Access already checked via HasBucketAccess; ensure bucket exists.
+        get_object_or_404(SubjectBucket, pk=serializer.validated_data["bucket_id"])
+
+        try:
+            result = pptx_from_outline(
+                serializer.validated_data["title"],
+                serializer.validated_data["slides"],
+            )
+        except PptxGenerationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        response = HttpResponse(
+            result.data,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "presentationml.presentation"
+            ),
+        )
+        response["Content-Disposition"] = f'attachment; filename="{result.filename}"'
+        response["X-Pptx-Title"] = result.title[:200]
+        response["X-Pptx-Slide-Count"] = str(result.slide_count)
+        return response
 
 
 # ---------------------------------------------------------------------------

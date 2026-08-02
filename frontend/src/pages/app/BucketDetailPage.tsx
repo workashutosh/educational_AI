@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
-import { ArrowLeft, Loader2, SendHorizontal, Upload } from "lucide-react"
+import { ArrowLeft, Loader2, MessageSquareText, Presentation, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   api,
@@ -12,31 +11,28 @@ import {
   isPendingStatus,
   statusLabel,
   type AccessGrant,
-  type AskSource,
   type Bucket,
-  type ChatMessage,
-  type ChatSession,
   type DocumentRow,
   type MemberRow,
 } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
-type Tab = "ask" | "notes" | "access"
+type Tab = "notes" | "access"
 
 export function BucketDetailPage() {
   const { bucketId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const { session } = useAuth()
   const id = Number(bucketId)
-  const tab = (searchParams.get("tab") as Tab) || "ask"
+  const tab = (searchParams.get("tab") as Tab) || "notes"
 
   const [bucket, setBucket] = useState<Bucket | null>(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
 
   const setTab = (t: Tab) => {
-    setSearchParams(t === "ask" ? {} : { tab: t })
+    setSearchParams(t === "notes" ? {} : { tab: t })
   }
 
   useEffect(() => {
@@ -78,7 +74,7 @@ export function BucketDetailPage() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100svh-5rem)] max-w-5xl flex-col">
+    <div className="flex h-full min-h-[calc(100svh-5rem)] w-full flex-col">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link
@@ -92,195 +88,54 @@ export function BucketDetailPage() {
             {bucket.grade_level || "No grade"} · AI Bucket #{bucket.id}
           </p>
         </div>
-        <div className="flex gap-1 rounded-xl border border-border/80 bg-white/80 p-1">
-          {(
-            [
-              ["ask", "Ask"],
-              ["notes", "Notes"],
-              ...(session?.can_manage ? ([["access", "Access"]] as const) : []),
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-sm font-medium transition",
-                tab === key
-                  ? "bg-[var(--brand)] text-white"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={`/app/chat?bucket=${bucket.id}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-white px-3 py-1.5 text-sm text-muted-foreground hover:border-[var(--brand)] hover:text-[var(--brand)]"
+          >
+            <MessageSquareText className="size-3.5" />
+            Chat
+          </Link>
+          <Link
+            to={`/app/ppt?bucket=${bucket.id}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-white px-3 py-1.5 text-sm text-muted-foreground hover:border-[var(--brand)] hover:text-[var(--brand)]"
+          >
+            <Presentation className="size-3.5" />
+            Create PPT
+          </Link>
+          <div className="flex gap-1 rounded-xl border border-border/80 bg-white/80 p-1">
+            {(
+              [
+                ["notes", "Notes"],
+                ...(session?.can_manage ? ([["access", "Access"]] as const) : []),
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key as Tab)}
+                className={cn(
+                  "rounded-lg px-3 py-1.5 text-sm font-medium transition",
+                  tab === key
+                    ? "bg-[var(--brand)] text-white"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
 
       <div className="min-h-0 flex-1">
-        {tab === "ask" ? <AskPanel bucketId={bucket.id} /> : null}
         {tab === "notes" ? (
           <NotesPanel bucketId={bucket.id} canUpload={!!session?.can_upload} />
         ) : null}
         {tab === "access" && session?.can_manage ? <AccessPanel bucketId={bucket.id} /> : null}
       </div>
-    </div>
-  )
-}
-
-function AskPanel({ bucketId }: { bucketId: number }) {
-  const [history, setHistory] = useState<ChatMessage[]>([])
-  const [sessionId, setSessionId] = useState<number | null>(null)
-  const [input, setInput] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState("")
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [history, busy])
-
-  async function ensureSession(): Promise<number> {
-    if (sessionId) return sessionId
-    const s = await api<ChatSession>("/api/chat/sessions/", {
-      method: "POST",
-      body: JSON.stringify({ bucket_id: bucketId, title: "Chat" }),
-    })
-    setSessionId(s.id)
-    return s.id
-  }
-
-  async function send(e?: FormEvent) {
-    e?.preventDefault()
-    const q = input.trim()
-    if (!q || busy) return
-    setInput("")
-    setError("")
-    setBusy(true)
-    const nextHistory = [...history, { role: "user" as const, content: q }]
-    setHistory(nextHistory)
-    try {
-      const sid = await ensureSession()
-      const res = await api<{
-        answer: string
-        sources: AskSource[]
-        session?: { id: number; title: string }
-      }>("/api/ask/", {
-        method: "POST",
-        body: JSON.stringify({
-          query: q,
-          bucket_id: bucketId,
-          session_id: sid,
-          history: nextHistory.slice(0, -1).map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
-      })
-      if (res.session?.id) setSessionId(res.session.id)
-      setHistory((h) => [
-        ...h,
-        { role: "assistant", content: res.answer, sources: res.sources || [] },
-      ])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ask failed")
-      setHistory((h) => h.slice(0, -1))
-      setInput(q)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  function newChat() {
-    setHistory([])
-    setSessionId(null)
-    setError("")
-  }
-
-  return (
-    <div className="flex h-full flex-col rounded-2xl border border-border/80 bg-white/80">
-      <div className="flex items-center justify-between border-b border-border/70 px-4 py-2">
-        <p className="text-sm text-muted-foreground">Grounded answers from indexed notes</p>
-        <Button type="button" variant="ghost" size="sm" onClick={newChat}>
-          New chat
-        </Button>
-      </div>
-      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        {!history.length && !busy ? (
-          <div className="mx-auto max-w-md py-12 text-center text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Ask anything from this AI Bucket</p>
-            <p className="mt-2">Try “Explain the main idea” or a formula from your notes.</p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {[
-                "Summarize the key topics",
-                "Give an example from the notes",
-                "What should I revise first?",
-              ].map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  className="rounded-full border border-border bg-white px-3 py-1.5 text-xs hover:border-[var(--brand)]"
-                  onClick={() => {
-                    setInput(q)
-                  }}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        {history.map((m, i) => (
-          <div
-            key={i}
-            className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
-          >
-            <div
-              className={cn(
-                "max-w-[90%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
-                m.role === "user"
-                  ? "bg-[#1e3a5f] text-white"
-                  : "border border-border/80 bg-[#f7faf8] text-foreground",
-              )}
-            >
-              {m.content}
-              {m.role === "assistant" && m.sources?.length ? (
-                <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/50 pt-2">
-                  {m.sources.slice(0, 4).map((s, j) => (
-                    <span
-                      key={j}
-                      className="rounded-md bg-white/80 px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                    >
-                      {s.document_filename || `doc ${s.document_id}`}
-                      {s.page_ref ? ` · p.${s.page_ref}` : ""}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ))}
-        {busy ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Thinking…
-          </div>
-        ) : null}
-        <div ref={bottomRef} />
-      </div>
-      {error ? <p className="px-4 text-sm text-destructive">{error}</p> : null}
-      <form onSubmit={send} className="flex gap-2 border-t border-border/70 p-3">
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask a question…"
-          disabled={busy}
-        />
-        <Button type="submit" disabled={busy || !input.trim()} size="icon">
-          <SendHorizontal className="size-4" />
-        </Button>
-      </form>
     </div>
   )
 }
@@ -337,7 +192,7 @@ function NotesPanel({ bucketId, canUpload }: { bucketId: number; canUpload: bool
   }
 
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-border/80 bg-white/80">
+    <div className="flex h-full min-h-[28rem] flex-col rounded-2xl border border-border/80 bg-white/80">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <div>
           <p className="font-medium">Notes</p>

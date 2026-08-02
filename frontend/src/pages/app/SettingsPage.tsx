@@ -9,7 +9,7 @@ export function SettingsPage() {
   const quotaGb = Math.round(Number(school.bucket_quota_bytes || 0) / (1024 ** 3)) || 1
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="w-full max-w-3xl space-y-6">
       <div>
         <h1 className="font-display text-3xl tracking-tight">Settings</h1>
         <p className="mt-1 text-muted-foreground">School plan, invite code, and account.</p>

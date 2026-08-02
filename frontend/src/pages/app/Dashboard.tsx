@@ -1,6 +1,6 @@
 import type { ComponentType } from "react"
 import { Link } from "react-router-dom"
-import { BookOpen, MessageSquareText, Upload } from "lucide-react"
+import { BookOpen, MessageSquareText, Presentation, Upload } from "lucide-react"
 
 import { buttonVariants } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
@@ -14,7 +14,7 @@ export function DashboardPage() {
   const quotaGb = Math.round(Number(school.bucket_quota_bytes || 0) / (1024 ** 3)) || 1
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8">
+    <div className="w-full space-y-8">
       <div>
         <p className="font-display text-sm tracking-[0.12em] uppercase text-[var(--brand)]">
           {school.name}
@@ -28,7 +28,7 @@ export function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Stat label="AI Buckets" value={String(buckets.length)} hint={`of ${school.max_buckets ?? "—"}`} />
         <Stat label="Per-bucket size" value={`${quotaGb} GB`} hint="Plan quota" />
         <Stat
@@ -39,7 +39,7 @@ export function DashboardPage() {
         />
       </div>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <QuickCard
           to="/app/buckets"
           icon={BookOpen}
@@ -47,14 +47,20 @@ export function DashboardPage() {
           body="Open subject spaces, create new ones, and manage notes."
         />
         <QuickCard
-          to={buckets[0] ? `/app/buckets/${buckets[0].id}` : "/app/buckets"}
+          to={buckets[0] ? `/app/chat?bucket=${buckets[0].id}` : "/app/chat"}
           icon={MessageSquareText}
-          title="Ask notes"
-          body="Chat with indexed notes grounded in your uploaded documents."
+          title="Chat"
+          body="Ask indexed notes with saved history for each conversation."
+        />
+        <QuickCard
+          to={buckets[0] ? `/app/ppt?bucket=${buckets[0].id}` : "/app/ppt"}
+          icon={Presentation}
+          title="Create PPT"
+          body="Preview a slide deck from your notes, then download when ready."
         />
         {can_upload ? (
           <QuickCard
-            to={buckets[0] ? `/app/buckets/${buckets[0].id}?tab=notes` : "/app/buckets"}
+            to={buckets[0] ? `/app/buckets/${buckets[0].id}` : "/app/buckets"}
             icon={Upload}
             title="Upload notes"
             body="Add PDFs, DOCX, or PPTX into an AI Bucket for retrieval."
@@ -70,7 +76,7 @@ export function DashboardPage() {
           </Link>
         </div>
         {buckets.length ? (
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {buckets.slice(0, 6).map((b) => (
               <li key={b.id}>
                 <Link

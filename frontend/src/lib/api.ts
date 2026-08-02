@@ -68,6 +68,7 @@ export type ChatMessage = {
 export type ChatSession = {
   id: number
   bucket: number
+  bucket_name?: string
   member: number
   title: string
   created_at: string
@@ -194,6 +195,53 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
   }
   if (!res.ok) throw parseError(data, res.status)
   return data as T
+}
+
+/** Binary download (e.g. generated PPTX). */
+export async function apiDownload(
+  path: string,
+  options: RequestInit & { token?: string | null } = {},
+): Promise<{ blob: Blob; filename: string }> {
+  const { token, headers, ...rest } = options
+  const auth = token === undefined ? getToken() : token
+  const res = await fetch(path, {
+    ...rest,
+    headers: {
+      "Content-Type": "application/json",
+      ...(auth ? { Authorization: `Token ${auth}` } : {}),
+      ...headers,
+    },
+  })
+
+  if (!res.ok) {
+    const text = await res.text()
+    let data: unknown = null
+    if (text) {
+      try {
+        data = JSON.parse(text)
+      } catch {
+        data = { detail: text }
+      }
+    }
+    throw parseError(data, res.status)
+  }
+
+  const blob = await res.blob()
+  const disposition = res.headers.get("Content-Disposition") || ""
+  const match = /filename="?([^";]+)"?/i.exec(disposition)
+  const filename = match?.[1]?.trim() || "download.bin"
+  return { blob, filename }
+}
+
+export function triggerBlobDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 export function formatBytes(n: number | null | undefined): string {

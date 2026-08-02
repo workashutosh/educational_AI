@@ -17,6 +17,12 @@ urlpatterns = [
     path("documents/<int:pk>/status/", views.DocumentStatusView.as_view(), name="document-status"),
     path("query/", views.QueryView.as_view(), name="query"),
     path("ask/", views.AskView.as_view(), name="ask"),
+    path("generate-pptx/", views.GeneratePptxView.as_view(), name="generate-pptx"),
+    path(
+        "generate-pptx/download/",
+        views.DownloadPptxView.as_view(),
+        name="generate-pptx-download",
+    ),
     path("chat/sessions/", views.ChatSessionListCreateView.as_view(), name="chat-session-list"),
     path(
         "chat/sessions/<int:pk>/",

@@ -4,6 +4,8 @@ import { AppLayout } from "@/components/app/AppLayout"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { BucketDetailPage } from "@/pages/app/BucketDetailPage"
 import { BucketsPage } from "@/pages/app/BucketsPage"
+import { ChatPage } from "@/pages/app/ChatPage"
+import { CreatePptPage } from "@/pages/app/CreatePptPage"
 import { DashboardPage } from "@/pages/app/Dashboard"
 import { SettingsPage } from "@/pages/app/SettingsPage"
 import { JoinPage } from "@/pages/Join"
@@ -39,6 +41,8 @@ export default function App() {
             <Route index element={<DashboardPage />} />
             <Route path="buckets" element={<BucketsPage />} />
             <Route path="buckets/:bucketId" element={<BucketDetailPage />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="ppt" element={<CreatePptPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
