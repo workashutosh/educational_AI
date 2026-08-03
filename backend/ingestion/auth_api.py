@@ -54,6 +54,7 @@ def _member_payload(user: User, token_key: str | None = None) -> dict:
         "buckets": [],
         "can_manage": False,
         "can_upload": False,
+        "can_create_students": False,
     }
     if token_key:
         payload["token"] = token_key
@@ -86,6 +87,7 @@ def _member_payload(user: User, token_key: str | None = None) -> dict:
             "buckets": buckets,
             "can_manage": member.is_manager_or_above,
             "can_upload": member.can_upload,
+            "can_create_students": member.can_create_students,
         }
     )
     return payload
@@ -146,8 +148,22 @@ class AuthLoginView(APIView):
             )
         user = authenticate(request, username=username, password=password)
         if user is None:
-            # Wireframe uses email as login identity — also try email as username.
+            # Also try lowercased username (email-as-username onboard admins).
             user = authenticate(request, username=username.lower(), password=password)
+        if user is None and "@" in username:
+            # Students may be told to log in with email even if username differs.
+            from django.contrib.auth import get_user_model
+
+            UserModel = get_user_model()
+            match = (
+                UserModel.objects.filter(email__iexact=username, is_active=True)
+                .order_by("id")
+                .first()
+            )
+            if match:
+                user = authenticate(
+                    request, username=match.username, password=password
+                )
         if user is None:
             return Response(
                 {"detail": "Invalid username or password."},

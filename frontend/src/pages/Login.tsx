@@ -53,13 +53,14 @@ export function LoginPage() {
     >
       <form className="space-y-4" onSubmit={onSubmit}>
         <div className="space-y-2">
-          <Label htmlFor="username">Username</Label>
+          <Label htmlFor="username">Username or email</Label>
           <Input
             id="username"
             autoComplete="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
+            placeholder="Credentials from your teacher or admin"
           />
         </div>
         <div className="space-y-2">

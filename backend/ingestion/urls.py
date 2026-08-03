@@ -15,6 +15,11 @@ urlpatterns = [
     path("buckets/", views.BucketListView.as_view(), name="bucket-list"),
     path("documents/", views.DocumentListCreateView.as_view(), name="document-list-create"),
     path("documents/<int:pk>/status/", views.DocumentStatusView.as_view(), name="document-status"),
+    path(
+        "documents/<int:pk>/pages/<int:page>/",
+        views.DocumentPageImageView.as_view(),
+        name="document-page-image",
+    ),
     path("query/", views.QueryView.as_view(), name="query"),
     path("ask/", views.AskView.as_view(), name="ask"),
     path("generate-pptx/", views.GeneratePptxView.as_view(), name="generate-pptx"),
@@ -31,6 +36,7 @@ urlpatterns = [
     ),
     path("admin/buckets/", views.AdminBucketCreateView.as_view(), name="admin-bucket-create"),
     path("admin/members/", views.AdminMembersListView.as_view(), name="admin-members"),
+    path("admin/students/", views.AdminCreateStudentView.as_view(), name="admin-create-student"),
     path(
         "admin/buckets/<int:pk>/grant/",
         views.AdminGrantAccessView.as_view(),

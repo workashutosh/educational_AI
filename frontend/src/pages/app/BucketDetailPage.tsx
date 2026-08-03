@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
-import { ArrowLeft, Loader2, MessageSquareText, Presentation, Upload } from "lucide-react"
+import {
+  ArrowLeft,
+  FileQuestion,
+  Loader2,
+  MessageSquareText,
+  Presentation,
+  Upload,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -12,20 +19,23 @@ import {
   statusLabel,
   type AccessGrant,
   type Bucket,
+  type DocumentKind,
   type DocumentRow,
   type MemberRow,
 } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
-type Tab = "notes" | "access"
+type Tab = "notes" | "papers" | "access"
 
 export function BucketDetailPage() {
   const { bucketId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const { session } = useAuth()
   const id = Number(bucketId)
-  const tab = (searchParams.get("tab") as Tab) || "notes"
+  const tabParam = searchParams.get("tab")
+  const tab: Tab =
+    tabParam === "papers" || tabParam === "access" ? tabParam : "notes"
 
   const [bucket, setBucket] = useState<Bucket | null>(null)
   const [error, setError] = useState("")
@@ -107,6 +117,7 @@ export function BucketDetailPage() {
             {(
               [
                 ["notes", "Notes"],
+                ["papers", "Question papers"],
                 ...(session?.can_manage ? ([["access", "Access"]] as const) : []),
               ] as const
             ).map(([key, label]) => (
@@ -132,7 +143,25 @@ export function BucketDetailPage() {
 
       <div className="min-h-0 flex-1">
         {tab === "notes" ? (
-          <NotesPanel bucketId={bucket.id} canUpload={!!session?.can_upload} />
+          <DocsPanel
+            bucketId={bucket.id}
+            canUpload={!!session?.can_upload}
+            kind="notes"
+            title="Notes"
+            subtitle="Teaching material · PDF, DOCX, PPTX · used for chat & PPT"
+            empty="No notes yet."
+          />
+        ) : null}
+        {tab === "papers" ? (
+          <DocsPanel
+            bucketId={bucket.id}
+            canUpload={!!session?.can_upload}
+            kind="question_paper"
+            title="Previous year question papers"
+            subtitle="Past exam papers · indexed for mock-test generation"
+            empty="No question papers yet."
+            icon
+          />
         ) : null}
         {tab === "access" && session?.can_manage ? <AccessPanel bucketId={bucket.id} /> : null}
       </div>
@@ -140,7 +169,23 @@ export function BucketDetailPage() {
   )
 }
 
-function NotesPanel({ bucketId, canUpload }: { bucketId: number; canUpload: boolean }) {
+function DocsPanel({
+  bucketId,
+  canUpload,
+  kind,
+  title,
+  subtitle,
+  empty,
+  icon,
+}: {
+  bucketId: number
+  canUpload: boolean
+  kind: DocumentKind
+  title: string
+  subtitle: string
+  empty: string
+  icon?: boolean
+}) {
   const [docs, setDocs] = useState<DocumentRow[]>([])
   const [error, setError] = useState("")
   const [uploading, setUploading] = useState(false)
@@ -148,10 +193,12 @@ function NotesPanel({ bucketId, canUpload }: { bucketId: number; canUpload: bool
   const pollRef = useRef<number | null>(null)
 
   const load = useCallback(async () => {
-    const rows = await api<DocumentRow[]>(`/api/documents/?bucket_id=${bucketId}`)
+    const rows = await api<DocumentRow[]>(
+      `/api/documents/?bucket_id=${bucketId}&kind=${kind}`,
+    )
     setDocs(rows)
     return rows
-  }, [bucketId])
+  }, [bucketId, kind])
 
   useEffect(() => {
     void load().catch((err) =>
@@ -181,6 +228,7 @@ function NotesPanel({ bucketId, canUpload }: { bucketId: number; canUpload: bool
       const form = new FormData()
       form.append("file", file)
       form.append("bucket_id", String(bucketId))
+      form.append("kind", kind)
       await apiUpload<DocumentRow>("/api/documents/", form)
       await load()
     } catch (err) {
@@ -195,8 +243,11 @@ function NotesPanel({ bucketId, canUpload }: { bucketId: number; canUpload: bool
     <div className="flex h-full min-h-[28rem] flex-col rounded-2xl border border-border/80 bg-white/80">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <div>
-          <p className="font-medium">Notes</p>
-          <p className="text-xs text-muted-foreground">PDF, DOCX, PPTX · auto-indexed after upload</p>
+          <p className="flex items-center gap-1.5 font-medium">
+            {icon ? <FileQuestion className="size-4 text-[var(--brand)]" /> : null}
+            {title}
+          </p>
+          <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
         {canUpload ? (
           <>
@@ -252,7 +303,8 @@ function NotesPanel({ bucketId, canUpload }: { bucketId: number; canUpload: bool
           </ul>
         ) : (
           <p className="py-10 text-center text-sm text-muted-foreground">
-            No notes yet.{canUpload ? " Upload a file to get started." : ""}
+            {empty}
+            {canUpload ? " Upload a file to get started." : ""}
           </p>
         )}
       </div>

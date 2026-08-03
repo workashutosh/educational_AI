@@ -30,6 +30,8 @@ export type Bucket = {
   is_archived?: boolean
 }
 
+export type DocumentKind = "notes" | "question_paper"
+
 export type DocumentRow = {
   id: number
   bucket: number
@@ -38,6 +40,7 @@ export type DocumentRow = {
   file_hash: string
   byte_size: number | null
   content_type: string
+  kind?: DocumentKind
   status: string
   error_message: string
   page_count: number | null
@@ -47,10 +50,14 @@ export type DocumentRow = {
 }
 
 export type AskSource = {
+  index?: number
   document_id?: number
   document_filename?: string
   heading_path?: string[] | string
   page_ref?: string
+  page_start?: number | null
+  page_end?: number | null
+  image_url?: string | null
   text?: string
   score?: number
 }
@@ -101,6 +108,7 @@ export type Session = {
   buckets: Bucket[]
   can_manage: boolean
   can_upload: boolean
+  can_create_students?: boolean
 }
 
 const TOKEN_KEY = "education_ai_token"

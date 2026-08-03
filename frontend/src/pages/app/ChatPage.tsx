@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Loader2, MessageSquarePlus, SendHorizontal } from "lucide-react"
 
+import { RichAnswer } from "@/components/chat/RichAnswer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api, type AskSource, type ChatMessage, type ChatSession } from "@/lib/api"
@@ -70,12 +71,25 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [history, busy])
 
+  // Skip session→history sync while a send is in flight (avoids wiping the
+  // first optimistic user bubble when a brand-new session id hits the URL).
+  const busyRef = useRef(false)
+  busyRef.current = busy
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       if (!activeSessionId) {
-        setSessionId(null)
-        setHistory([])
+        // Only clear when explicitly leaving a session (e.g. New chat), not mid-send
+        if (!busyRef.current) {
+          setSessionId(null)
+          setHistory([])
+        }
+        return
+      }
+      // Don't overwrite in-progress first message with an empty server session
+      if (busyRef.current) {
+        setSessionId(activeSessionId)
         return
       }
       setLoadingChat(true)
@@ -115,9 +129,9 @@ export function ChatPage() {
       method: "POST",
       body: JSON.stringify({ bucket_id: bucketId, title: "New chat" }),
     })
+    // Keep session id in state only — do NOT put it in the URL yet.
+    // Updating the URL here reloads an empty session and wipes the first message.
     setSessionId(s.id)
-    setQuery({ session: s.id })
-    await loadSessions()
     return s.id
   }
 
@@ -148,14 +162,14 @@ export function ChatPage() {
           })),
         }),
       })
-      if (res.session?.id) {
-        setSessionId(res.session.id)
-        setQuery({ session: res.session.id })
-      }
-      setHistory((h) => [
-        ...h,
+      const finalSid = res.session?.id || sid
+      setSessionId(finalSid)
+      setHistory([
+        ...nextHistory,
         { role: "assistant", content: res.answer, sources: res.sources || [] },
       ])
+      // Sync URL after messages are on screen + persisted
+      setQuery({ session: finalSid })
       void loadSessions()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ask failed")
@@ -175,12 +189,18 @@ export function ChatPage() {
 
   const activeBucket = buckets.find((b) => b.id === bucketId)
 
+  const isStudent = session?.membership?.role === "student"
+
   if (!buckets.length) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-muted-foreground">
         <div>
-          <p className="font-medium text-foreground">No AI Buckets yet</p>
-          <p className="mt-1 text-sm">Create or get access to an AI Bucket to start chatting.</p>
+          <p className="font-medium text-foreground">No AI Buckets available</p>
+          <p className="mt-1 text-sm">
+            {isStudent
+              ? "Ask your teacher to grant you access to an AI Bucket, then you can chat with its notes here."
+              : "Create or get access to an AI Bucket to start chatting."}
+          </p>
         </div>
       </div>
     )
@@ -261,7 +281,9 @@ export function ChatPage() {
               {activeBucket?.name || "Chat"}
             </h1>
             <p className="text-xs text-muted-foreground">
-              Grounded answers from indexed notes
+              {isStudent
+                ? "Ask questions from notes in your assigned AI Buckets"
+                : "Grounded answers from indexed notes"}
               {sessionId ? ` · session #${sessionId}` : ""}
             </p>
           </div>
@@ -303,26 +325,17 @@ export function ChatPage() {
             >
               <div
                 className={cn(
-                  "max-w-[min(48rem,92%)] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap",
+                  "max-w-[min(48rem,92%)] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
                   m.role === "user"
-                    ? "bg-[#1e3a5f] text-white"
+                    ? "whitespace-pre-wrap bg-[#1e3a5f] text-white"
                     : "border border-border/80 bg-white text-foreground",
                 )}
               >
-                {m.content}
-                {m.role === "assistant" && m.sources?.length ? (
-                  <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/50 pt-2">
-                    {m.sources.slice(0, 4).map((s, j) => (
-                      <span
-                        key={j}
-                        className="rounded-md bg-[#f7faf8] px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                      >
-                        {s.document_filename || `doc ${s.document_id}`}
-                        {s.page_ref ? ` · ${s.page_ref}` : ""}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
+                {m.role === "assistant" ? (
+                  <RichAnswer content={m.content} sources={m.sources} />
+                ) : (
+                  m.content
+                )}
               </div>
             </div>
           ))}

@@ -47,6 +47,15 @@ class School(models.Model):
                 return code
         raise RuntimeError("Could not allocate a unique school join code")
 
+    def active_member_count(self) -> int:
+        return self.memberships.filter(is_active=True).count()
+
+    def can_add_member(self) -> bool:
+        """False when max_users is set (>0) and school is at capacity."""
+        if not self.max_users:
+            return True
+        return self.active_member_count() < int(self.max_users)
+
 
 class PendingOnboard(models.Model):
     """Ephemeral school-admin signup awaiting Brevo email OTP verification."""
@@ -145,6 +154,15 @@ class SchoolMembership(models.Model):
     def can_upload(self) -> bool:
         return self.role in {self.ROLE_ADMIN, self.ROLE_MANAGER, self.ROLE_TEACHER}
 
+    @property
+    def can_create_students(self) -> bool:
+        """Admins, managers, and teachers may provision student logins."""
+        return self.role in {
+            self.ROLE_ADMIN,
+            self.ROLE_MANAGER,
+            self.ROLE_TEACHER,
+        }
+
     def has_bucket_access(self, bucket) -> bool:
         if not self.is_active or bucket.school_id != self.school_id:
             return False
@@ -235,6 +253,13 @@ class Document(models.Model):
         (STATUS_FAILED, "Failed"),
     ]
 
+    KIND_NOTES = "notes"
+    KIND_QUESTION_PAPER = "question_paper"
+    KIND_CHOICES = [
+        (KIND_NOTES, "Teaching notes"),
+        (KIND_QUESTION_PAPER, "Previous year question paper"),
+    ]
+
     bucket = models.ForeignKey(SubjectBucket, on_delete=models.CASCADE, related_name="documents")
     uploaded_by = models.ForeignKey(
         SchoolMembership,
@@ -248,6 +273,13 @@ class Document(models.Model):
     file_hash = models.CharField(max_length=64, db_index=True)
     byte_size = models.BigIntegerField(null=True, blank=True)
     content_type = models.CharField(max_length=120, blank=True)
+    kind = models.CharField(
+        max_length=32,
+        choices=KIND_CHOICES,
+        default=KIND_NOTES,
+        db_index=True,
+        help_text="notes = teaching material; question_paper = past exam papers for mock tests.",
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_QUEUED)
     error_message = models.TextField(blank=True)
     page_count = models.IntegerField(null=True, blank=True)
@@ -265,7 +297,10 @@ class Document(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["bucket", "status"])]
+        indexes = [
+            models.Index(fields=["bucket", "status"]),
+            models.Index(fields=["bucket", "kind", "status"]),
+        ]
 
     def __str__(self):
         return f"{self.original_filename} [{self.status}]"

@@ -101,6 +101,36 @@ class CanUpload(BasePermission):
         return True
 
 
+class CanCreateStudents(BasePermission):
+    """Admins, managers, and teachers may create student accounts."""
+
+    message = "Your role is not allowed to create student profiles."
+
+    def has_permission(self, request, view):
+        member = get_membership(request.user)
+        if member is None or not member.can_create_students:
+            return False
+        request.member = member
+        request.teacher = member
+        return True
+
+
+class CanListMembers(BasePermission):
+    """Managers/admins (grants) and anyone who can create students (roster)."""
+
+    message = "You cannot list school members."
+
+    def has_permission(self, request, view):
+        member = get_membership(request.user)
+        if member is None:
+            return False
+        if member.is_manager_or_above or member.can_create_students:
+            request.member = member
+            request.teacher = member
+            return True
+        return False
+
+
 class IsSchoolAdmin(BasePermission):
     """School admin only."""
 

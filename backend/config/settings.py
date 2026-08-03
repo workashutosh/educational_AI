@@ -39,6 +39,9 @@ INSTALLED_APPS = [
     "drf_spectacular",
     # Local
     "ingestion",
+    "rag_harness",
+    "mock_tests",
+    "lectures",
 ]
 
 MIDDLEWARE = [
@@ -170,12 +173,21 @@ GROQ_API_KEY = env("GROQ_API_KEY", default="")
 GROQ_MODEL = env("GROQ_MODEL", default="llama-3.3-70b-versatile")
 
 # ---------------------------------------------------------------------------
+# RAG harness (rag_harness.agent.run_query) — shared query/retrieval layer
+# for future agents. Reuses GROQ_* / PAGEINDEX_MODEL + GEMINI_API_KEY above.
+# ---------------------------------------------------------------------------
+RAG_HARNESS_TOP_K = env.int("RAG_HARNESS_TOP_K", default=5)
+RAG_HARNESS_MAX_CONTEXT_CHARS = env.int("RAG_HARNESS_MAX_CONTEXT_CHARS", default=12000)
+
+# ---------------------------------------------------------------------------
 # Brevo — transactional email for onboarding OTP
 # https://developers.brevo.com/docs/send-a-transactional-email
 # ---------------------------------------------------------------------------
 BREVO_API_KEY = env("BREVO_API_KEY", default="")
 BREVO_SENDER_EMAIL = env("BREVO_SENDER_EMAIL", default="")
 BREVO_SENDER_NAME = env("BREVO_SENDER_NAME", default="Education AI")
+# Used in result emails (link back to My Tests)
+FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://127.0.0.1:5173").rstrip("/")
 OTP_TTL_SECONDS = env.int("OTP_TTL_SECONDS", default=600)
 OTP_RESEND_COOLDOWN_SECONDS = env.int("OTP_RESEND_COOLDOWN_SECONDS", default=60)
 OTP_MAX_ATTEMPTS = env.int("OTP_MAX_ATTEMPTS", default=5)
@@ -191,3 +203,14 @@ ALLOW_OPEN_ASK = env.bool("ALLOW_OPEN_ASK", default=DEBUG)
 
 # Upload limits (bytes) — soft guard for small VPS disks
 MAX_UPLOAD_BYTES = env.int("MAX_UPLOAD_BYTES", default=50 * 1024 * 1024)
+
+# ---------------------------------------------------------------------------
+# Microsoft Graph — Teams online meetings for Lectures
+# https://learn.microsoft.com/en-us/graph/api/application-post-onlinemeetings
+# Requires OnlineMeetings.ReadWrite.All + application access policy.
+# ---------------------------------------------------------------------------
+MS_GRAPH_TENANT_ID = env("MS_GRAPH_TENANT_ID", default="")
+MS_GRAPH_CLIENT_ID = env("MS_GRAPH_CLIENT_ID", default="")
+MS_GRAPH_CLIENT_SECRET = env("MS_GRAPH_CLIENT_SECRET", default="")
+# Entra object ID or UPN of the user who organizes meetings
+MS_GRAPH_ORGANIZER_USER_ID = env("MS_GRAPH_ORGANIZER_USER_ID", default="")

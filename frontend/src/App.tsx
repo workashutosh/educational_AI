@@ -1,13 +1,22 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 
 import { AppLayout } from "@/components/app/AppLayout"
+import { StaffOnly } from "@/components/app/RoleGate"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { BucketDetailPage } from "@/pages/app/BucketDetailPage"
 import { BucketsPage } from "@/pages/app/BucketsPage"
 import { ChatPage } from "@/pages/app/ChatPage"
 import { CreatePptPage } from "@/pages/app/CreatePptPage"
 import { DashboardPage } from "@/pages/app/Dashboard"
+import { LectureRoomPage } from "@/pages/app/LectureRoomPage"
+import { LecturesPage } from "@/pages/app/LecturesPage"
 import { SettingsPage } from "@/pages/app/SettingsPage"
+import { MockTestCreatePage } from "@/pages/app/MockTestCreatePage"
+import { MockTestDetailPage } from "@/pages/app/MockTestDetailPage"
+import { MockTestsPage } from "@/pages/app/MockTestsPage"
+import { MockTestStudentResultPage } from "@/pages/app/MockTestStudentResultPage"
+import { MockTestTakePage } from "@/pages/app/MockTestTakePage"
+import { StudentsPage } from "@/pages/app/StudentsPage"
 import { JoinPage } from "@/pages/Join"
 import { LandingPage } from "@/pages/Landing"
 import { LoginPage } from "@/pages/Login"
@@ -39,10 +48,60 @@ export default function App() {
           <Route path="/join" element={<JoinPage />} />
           <Route path="/app" element={<ProtectedShell />}>
             <Route index element={<DashboardPage />} />
-            <Route path="buckets" element={<BucketsPage />} />
-            <Route path="buckets/:bucketId" element={<BucketDetailPage />} />
+            <Route
+              path="buckets"
+              element={
+                <StaffOnly>
+                  <BucketsPage />
+                </StaffOnly>
+              }
+            />
+            <Route
+              path="buckets/:bucketId"
+              element={
+                <StaffOnly>
+                  <BucketDetailPage />
+                </StaffOnly>
+              }
+            />
             <Route path="chat" element={<ChatPage />} />
-            <Route path="ppt" element={<CreatePptPage />} />
+            <Route path="lectures" element={<LecturesPage />} />
+            <Route path="lectures/:lectureId" element={<LectureRoomPage />} />
+            <Route
+              path="ppt"
+              element={
+                <StaffOnly>
+                  <CreatePptPage />
+                </StaffOnly>
+              }
+            />
+            <Route path="mock-tests" element={<MockTestsPage />} />
+            <Route
+              path="mock-tests/new"
+              element={
+                <StaffOnly>
+                  <MockTestCreatePage />
+                </StaffOnly>
+              }
+            />
+            <Route path="mock-tests/:testId" element={<MockTestDetailPage />} />
+            <Route path="mock-tests/:testId/take" element={<MockTestTakePage />} />
+            <Route
+              path="mock-tests/:testId/results/:studentId"
+              element={
+                <StaffOnly>
+                  <MockTestStudentResultPage />
+                </StaffOnly>
+              }
+            />
+            <Route
+              path="students"
+              element={
+                <StaffOnly>
+                  <StudentsPage />
+                </StaffOnly>
+              }
+            />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

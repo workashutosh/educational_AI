@@ -36,11 +36,20 @@ class RetrievedChunk:
     score: float
 
 
-def search_bucket(bucket_id: int, query: str, top_k: int = 5) -> list[RetrievedChunk]:
+def search_bucket(
+    bucket_id: int,
+    query: str,
+    top_k: int = 5,
+    *,
+    kinds: list[str] | None = None,
+) -> list[RetrievedChunk]:
+    qs = Chunk.objects.filter(
+        bucket_id=bucket_id, embedding__isnull=False
+    ).select_related("document")
+    if kinds:
+        qs = qs.filter(document__kind__in=kinds)
     rows = list(
-        Chunk.objects.filter(bucket_id=bucket_id, embedding__isnull=False)
-        .select_related("document")
-        .values(
+        qs.values(
             "id",
             "document_id",
             "document__original_filename",

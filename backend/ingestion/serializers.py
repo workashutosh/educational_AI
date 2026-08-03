@@ -26,6 +26,7 @@ class DocumentSerializer(serializers.ModelSerializer):
             "file_hash",
             "byte_size",
             "content_type",
+            "kind",
             "status",
             "error_message",
             "page_count",
@@ -39,6 +40,11 @@ class DocumentSerializer(serializers.ModelSerializer):
 class DocumentUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
     bucket_id = serializers.IntegerField()
+    kind = serializers.ChoiceField(
+        choices=["notes", "question_paper"],
+        required=False,
+        default="notes",
+    )
 
 
 class DocumentStatusSerializer(serializers.ModelSerializer):
@@ -108,6 +114,21 @@ class GrantAccessSerializer(serializers.Serializer):
         return attrs
 
 
+class CreateStudentSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(min_length=8, max_length=128, write_only=True)
+    full_name = serializers.CharField(required=False, allow_blank=True, max_length=150, default="")
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
+    bucket_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Optional AI Bucket to grant the student immediately.",
+    )
+
+    def validate_username(self, value):
+        return (value or "").strip()
+
+
 class BucketAccessSerializer(serializers.ModelSerializer):
     member_id = serializers.IntegerField(source="member.id", read_only=True)
     teacher_id = serializers.IntegerField(source="member.id", read_only=True)  # legacy
@@ -162,3 +183,20 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        sources = data.get("sources") or []
+        enriched = []
+        for s in sources:
+            if not isinstance(s, dict):
+                enriched.append(s)
+                continue
+            row = dict(s)
+            page = row.get("page_start")
+            doc_id = row.get("document_id")
+            if page is not None and doc_id and not row.get("image_url"):
+                row["image_url"] = f"/api/documents/{doc_id}/pages/{int(page)}/"
+            enriched.append(row)
+        data["sources"] = enriched
+        return data

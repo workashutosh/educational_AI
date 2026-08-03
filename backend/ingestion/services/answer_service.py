@@ -49,7 +49,11 @@ _SYSTEM_PROMPT = (
     "- Chemical formulae / reactions with mhchem inside math: "
     "$\\ce{H2SO4}$ or $$\\ce{2H2 + O2 -> 2H2O}$$\n"
     "- Do NOT write plain-text approximations like ∫sin(mx) dx or H2O when "
-    "LaTeX is possible — always use $...$ / $$...$$ / $\\ce{...}$."
+    "LaTeX is possible — always use $...$ / $$...$$ / $\\ce{...}$.\n"
+    "- Prefer short markdown structure: headings, bullets, and numbered steps "
+    "when helpful.\n"
+    "- When a cited excerpt includes a figure / diagram / graph, say so "
+    "(e.g. 'See the figure on page N [1]') so the student UI can show that page."
 )
 
 _FOLLOWUP_HINT = re.compile(
@@ -92,7 +96,13 @@ def answer_question(
 
     syllabus_hint = _resolve_syllabus_topic(bucket_id, question, history)
     retrieval_query = _retrieval_query(question, history, syllabus_hint=syllabus_hint)
-    chunks = search_bucket(bucket_id, query=retrieval_query, top_k=top_k)
+    # Chat/ask uses teaching notes; previous-year papers are for mock tests.
+    chunks = search_bucket(
+        bucket_id,
+        query=retrieval_query,
+        top_k=top_k,
+        kinds=["notes"],
+    )
 
     if not chunks:
         return GeneratedAnswer(
@@ -276,7 +286,7 @@ def _resolve_syllabus_topic(
 
 def _find_heading_for_text(bucket_id: int, text: str) -> str | None:
     """Best matching leaf heading for a free-text topic mention."""
-    hits = search_bucket(bucket_id, query=text, top_k=8)
+    hits = search_bucket(bucket_id, query=text, top_k=8, kinds=["notes"])
     for hit in hits:
         for part in reversed(hit.heading_path or []):
             if _SECTION_HEADING.search(part) or re.search(

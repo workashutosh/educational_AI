@@ -26,7 +26,10 @@ export function SettingsPage() {
         <h2 className="font-medium">Plan</h2>
         <Row label="AI Buckets" value={`${school.max_buckets ?? "—"} max`} />
         <Row label="Size per bucket" value={`${quotaGb} GB`} />
-        <Row label="User seats" value={String(school.max_users ?? 0)} />
+        <Row
+          label="User seats"
+          value={school.max_users ? String(school.max_users) : "Unlimited"}
+        />
         <Row label="Manager seats" value={String(school.max_managers ?? 0)} />
       </section>
 
@@ -34,7 +37,7 @@ export function SettingsPage() {
         <section className="rounded-2xl border border-border/80 bg-white/80 p-5">
           <h2 className="font-medium">School join code</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Teachers and students use this code on the Join screen.
+            Teachers and students can also self-join with this code.
           </p>
           <p className="mt-4 font-mono text-3xl tracking-[0.2em] text-foreground">
             {school.join_code || "—"}

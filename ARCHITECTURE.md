@@ -14,12 +14,14 @@
 
 ## Roles (school-scoped)
 
-| Role | Buckets | Upload | Ask/Chat | Create buckets | Grant access | Manage members |
+| Role | Buckets | Upload | Ask/Chat | Create buckets | Grant access | Create students |
 |------|---------|--------|----------|----------------|--------------|----------------|
 | `admin` | all in school | yes | yes | yes | yes | yes |
-| `manager` | all in school | yes | yes | yes | yes | teachers/students only |
-| `teacher` | granted only | yes | yes | no | no | no |
+| `manager` | all in school | yes | yes | yes | yes | yes |
+| `teacher` | granted only | yes | yes | no | no | yes |
 | `student` | granted only | **no** | yes | no | no | no |
+
+Student logins: `POST /api/admin/students/` (admin/manager/teacher) sets username+password; student signs in at `/api/auth/login/`. Optional `bucket_id` grants access at create time. `School.max_users` (when &gt; 0) caps total active memberships.
 
 Platform operator = Django `is_superuser` (create schools, first admin).
 
@@ -48,8 +50,24 @@ Uploads additionally require role ∈ {`admin`, `manager`, `teacher`}.
 └─────────────────────────────────────────────┘
 ```
 
+## Mock tests (`mock_tests`)
+
+Teachers configure a blueprint (duration, MCQ / multi-select / brief counts + marks), generate from an AI Bucket via RAG + LLM, preview/edit, then assign and publish. Students get a timed attempt. Objective items auto-grade; brief answers get an AI provisional score that teachers confirm or override before the official result is final.
+
+## RAG harness (`rag_harness`)
+
+Shared query/retrieval layer for future agents. **Only import** `rag_harness.agent.run_query`.
+
+```text
+check_bucket_access → indexed Documents → retrieve → build_context → LLM → {answer, sources}
+```
+
+Proof endpoint: `POST /api/harness/query/` `{bucket_id, query}`.
+
+Retrieval uses PageIndex tree-search when trees include node text; otherwise embedding `search_bucket` (current indexing path). LLM reuses `GROQ_*` / `PAGEINDEX_MODEL` + `GEMINI_API_KEY` via LiteLLM.
+
 ## Non-goals (pilot)
 
 - Multi-region / S3 (interface ready, not required)
 - pgvector ANN (add when chunk count hurts)
-- Question-paper generation agent (ingestion + chat first)
+- Question-paper generation agent (call `run_query` from a separate app later)

@@ -4,8 +4,10 @@ DRF views for school-scoped notes: buckets, documents, query/ask, chat.
 from __future__ import annotations
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse
+from django.db import transaction
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from rest_framework import status
@@ -24,6 +26,8 @@ from .models import (
     SubjectBucket,
 )
 from .permissions import (
+    CanCreateStudents,
+    CanListMembers,
     CanUpload,
     HasBucketAccess,
     IsManagerOrAdmin,
@@ -35,6 +39,7 @@ from .serializers import (
     BucketAccessSerializer,
     ChatMessageSerializer,
     ChatSessionSerializer,
+    CreateStudentSerializer,
     DocumentSerializer,
     DocumentStatusSerializer,
     DocumentUploadSerializer,
@@ -45,8 +50,11 @@ from .serializers import (
     SubjectBucketCreateSerializer,
     SubjectBucketSerializer,
 )
+
+User = get_user_model()
 from .services import find_indexed_duplicate, sha256_of_uploaded_file
 from .services.answer_service import answer_question
+from .services.page_image_service import render_document_page
 from .services.pptx_service import (
     PptxGenerationError,
     generate_pptx_outline,
@@ -159,6 +167,10 @@ class DocumentListCreateView(APIView):
         if status_filter:
             qs = qs.filter(status=status_filter)
 
+        kind = (request.query_params.get("kind") or "").strip().lower()
+        if kind in {Document.KIND_NOTES, Document.KIND_QUESTION_PAPER}:
+            qs = qs.filter(kind=kind)
+
         return Response(DocumentSerializer(qs, many=True).data)
 
     def post(self, request):
@@ -172,6 +184,7 @@ class DocumentListCreateView(APIView):
 
         uploaded = serializer.validated_data["file"]
         file_hash = sha256_of_uploaded_file(uploaded)
+        kind = serializer.validated_data.get("kind") or Document.KIND_NOTES
 
         duplicate = find_indexed_duplicate(bucket.id, file_hash)
         document = Document.objects.create(
@@ -182,6 +195,7 @@ class DocumentListCreateView(APIView):
             file_hash=file_hash,
             byte_size=getattr(uploaded, "size", None),
             content_type=getattr(uploaded, "content_type", "") or "",
+            kind=kind,
             status=Document.STATUS_DUPLICATE if duplicate else Document.STATUS_QUEUED,
             duplicate_of=duplicate,
         )
@@ -214,6 +228,35 @@ class DocumentStatusView(APIView):
         return Response(DocumentStatusSerializer(document).data)
 
 
+class DocumentPageImageView(APIView):
+    """
+    GET /api/documents/{id}/pages/{page}/ — PNG preview of a PDF/image page.
+    Requires bucket access (teachers and students with grants).
+    """
+
+    permission_classes = [IsSchoolMember]
+
+    def get(self, request, pk, page: int):
+        member = request.member
+        document = get_object_or_404(
+            Document.objects.select_related("bucket"),
+            pk=pk,
+            bucket__school=member.school,
+        )
+        if not member.has_bucket_access(document.bucket):
+            return Response(
+                {"detail": "You do not have access to this document's bucket."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        path = render_document_page(document, int(page))
+        if path is None:
+            return Response(
+                {"detail": "Page image not available."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return FileResponse(path.open("rb"), content_type="image/png")
+
+
 def _page_ref(start: int | None, end: int | None) -> str | None:
     if start is None:
         return None
@@ -227,13 +270,10 @@ class QueryView(APIView):
 
     def get_permissions(self):
         if _open_ask_allowed():
+            # Still run TokenAuthentication (default authenticators) so logged-in
+            # callers keep request.user; AllowAny only skips the membership gate.
             return [AllowAny()]
         return [IsSchoolMember(), HasBucketAccess()]
-
-    def get_authenticators(self):
-        if _open_ask_allowed():
-            return []
-        return super().get_authenticators()
 
     def get_bucket_id(self):
         return self.request.data.get("bucket_id")
@@ -248,7 +288,7 @@ class QueryView(APIView):
         top_k = serializer.validated_data.get("top_k", 5)
         query = serializer.validated_data["query"]
 
-        results = search_bucket(bucket.id, query=query, top_k=top_k)
+        results = search_bucket(bucket.id, query=query, top_k=top_k, kinds=["notes"])
         if not results:
             return Response(
                 {
@@ -283,18 +323,14 @@ class QueryView(APIView):
 class AskView(APIView):
     """
     POST /api/ask/ — RAG answer. Optional session_id persists the turn.
-    ALLOW_OPEN_ASK=True keeps the pilot chat page working without login.
+    ALLOW_OPEN_ASK=True keeps the pilot chat page working without login,
+    but authenticated Token requests still bind request.user so history saves.
     """
 
     def get_permissions(self):
         if _open_ask_allowed():
             return [AllowAny()]
         return [IsSchoolMember(), HasBucketAccess()]
-
-    def get_authenticators(self):
-        if _open_ask_allowed():
-            return []
-        return super().get_authenticators()
 
     def get_bucket_id(self):
         return self.request.data.get("bucket_id")
@@ -318,17 +354,25 @@ class AskView(APIView):
         except RuntimeError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
 
-        sources = [
-            {
-                "index": i,
-                "document_id": s.document_id,
-                "document_filename": s.document_filename,
-                "heading_path": s.heading_path,
-                "page_ref": _page_ref(s.page_start, s.page_end),
-                "score": round(s.score, 4),
-            }
-            for i, s in enumerate(result.sources, start=1)
-        ]
+        sources = []
+        for i, s in enumerate(result.sources, start=1):
+            page = s.page_start
+            image_url = None
+            if page is not None:
+                image_url = f"/api/documents/{s.document_id}/pages/{int(page)}/"
+            sources.append(
+                {
+                    "index": i,
+                    "document_id": s.document_id,
+                    "document_filename": s.document_filename,
+                    "heading_path": s.heading_path,
+                    "page_ref": _page_ref(s.page_start, s.page_end),
+                    "page_start": s.page_start,
+                    "page_end": s.page_end,
+                    "image_url": image_url,
+                    "score": round(s.score, 4),
+                }
+            )
 
         session_payload = None
         member = getattr(request, "member", None) or get_membership(request.user)
@@ -347,7 +391,12 @@ class AskView(APIView):
                 retrieval_query=result.retrieval_query or "",
                 model=result.model,
             )
-            if not session.title:
+            placeholder = not session.title or session.title.strip().lower() in {
+                "new chat",
+                "untitled",
+                "untitled chat",
+            }
+            if placeholder:
                 session.title = question[:120]
             session.updated_at = timezone.now()
             session.save(update_fields=["title", "updated_at"])
@@ -495,17 +544,22 @@ class ChatSessionDetailView(APIView):
 
 
 class AdminMembersListView(APIView):
-    """List school members so managers can grant bucket access."""
+    """List school members (managers for grants; teachers for student roster)."""
 
-    permission_classes = [IsManagerOrAdmin]
+    permission_classes = [CanListMembers]
 
     def get(self, request):
         member = request.member
-        rows = (
-            SchoolMembership.objects.filter(school=member.school, is_active=True)
-            .select_related("user")
-            .order_by("role", "user__username")
-        )
+        rows = SchoolMembership.objects.filter(
+            school=member.school, is_active=True
+        ).select_related("user")
+        role = (request.query_params.get("role") or "").strip().lower()
+        if role:
+            rows = rows.filter(role=role)
+        # Teachers only need the student roster for provisioning UI.
+        if member.role == SchoolMembership.ROLE_TEACHER and not role:
+            rows = rows.filter(role=SchoolMembership.ROLE_STUDENT)
+        rows = rows.order_by("role", "user__username")
         return Response(
             [
                 {
@@ -518,6 +572,100 @@ class AdminMembersListView(APIView):
                 }
                 for m in rows
             ]
+        )
+
+
+class AdminCreateStudentView(APIView):
+    """
+    POST /api/admin/students/ — admin/manager/teacher creates a student login.
+
+    Body: {username, password, full_name?, email?, bucket_id?}
+    Students sign in via /api/auth/login/ with those credentials.
+    """
+
+    permission_classes = [CanCreateStudents]
+
+    def post(self, request):
+        serializer = CreateStudentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        actor = request.member
+        school = actor.school
+
+        if not school.can_add_member():
+            return Response(
+                {
+                    "detail": (
+                        f"School user seat limit reached ({school.max_users}). "
+                        "Upgrade the plan or deactivate unused accounts."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        username = serializer.validated_data["username"]
+        password = serializer.validated_data["password"]
+        full_name = (serializer.validated_data.get("full_name") or "").strip()
+        email = (serializer.validated_data.get("email") or "").strip().lower()
+        bucket_id = serializer.validated_data.get("bucket_id")
+
+        if not username:
+            return Response(
+                {"detail": "Username is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if User.objects.filter(username__iexact=username).exists():
+            return Response(
+                {"detail": "That username is already taken."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if email and User.objects.filter(email__iexact=email).exists():
+            return Response(
+                {"detail": "That email is already in use."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        bucket = None
+        if bucket_id is not None:
+            bucket = get_object_or_404(SubjectBucket, pk=bucket_id, school=school)
+            if not actor.has_bucket_access(bucket):
+                return Response(
+                    {"detail": "You do not have access to that AI Bucket."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+                first_name=full_name[:150],
+            )
+            student = SchoolMembership.objects.create(
+                school=school,
+                user=user,
+                role=SchoolMembership.ROLE_STUDENT,
+                is_active=True,
+            )
+            granted = False
+            if bucket is not None:
+                BucketAccess.objects.get_or_create(
+                    member=student,
+                    bucket=bucket,
+                    defaults={"granted_by": actor},
+                )
+                granted = True
+
+        return Response(
+            {
+                "id": student.id,
+                "username": user.username,
+                "email": user.email,
+                "full_name": user.first_name or "",
+                "role": student.role,
+                "role_display": student.get_role_display(),
+                "bucket_granted": bucket.id if granted else None,
+            },
+            status=status.HTTP_201_CREATED,
         )
 
 

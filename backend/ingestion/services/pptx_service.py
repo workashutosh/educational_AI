@@ -78,7 +78,7 @@ def generate_pptx_outline(
         raise PptxGenerationError("slide_count must be between 3 and 15.")
 
     model = getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
-    chunks = search_bucket(bucket_id, query=prompt, top_k=top_k)
+    chunks = search_bucket(bucket_id, query=prompt, top_k=top_k, kinds=["notes"])
     if not chunks:
         raise PptxGenerationError(
             "No matching notes found in this AI Bucket. Index notes first, "

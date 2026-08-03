@@ -71,6 +71,8 @@ npm_config_cache=../.npm-cache npx --yes shadcn@4.15.0 add card input
 | `/app/buckets/:id` | Notes · Access (links out to Chat / PPT) |
 | `/app/chat` | Chat with history (pick AI Bucket) |
 | `/app/ppt` | Create PPT preview + download |
+| `/app/mock-tests` | Mock tests — generate, assign, take, scores |
+| `/app/students` | Create student logins + roster (admin/manager/teacher) |
 | `/app/settings` | Plan, join code, account |
 
 Django template fallbacks still exist under `/accounts/...` on the API host.
@@ -82,9 +84,9 @@ OTP emails are sent via Brevo (`BREVO_API_KEY` / `BREVO_SENDER_EMAIL` in `backen
 
 | Role | Access |
 |------|--------|
-| `admin` / `manager` | All buckets in school; create buckets; grant access |
-| `teacher` | Upload + ask on **granted** buckets |
-| `student` | Ask only on **granted** buckets |
+| `admin` / `manager` | All buckets; create buckets; grant access; create students |
+| `teacher` | Upload + ask on **granted** buckets; create students |
+| `student` | Ask only on **granted** buckets (login with provisioned credentials) |
 
 ## API (member)
 
@@ -95,11 +97,14 @@ OTP emails are sent via Brevo (`BREVO_API_KEY` / `BREVO_SENDER_EMAIL` in `backen
 | GET | `/api/documents/{id}/status/` | Poll status |
 | POST | `/api/query/` | Raw vector search |
 | POST | `/api/ask/` | RAG answer (+ optional `session_id`) |
+| POST | `/api/harness/query/` | Harness proof: `{bucket_id, query}` → `{answer, sources}` |
 | POST | `/api/generate-pptx/` | `{bucket_id, prompt, slide_count}` → JSON outline (preview) |
 | POST | `/api/generate-pptx/download/` | `{bucket_id, title, slides}` → `.pptx` download |
 | GET/POST | `/api/chat/sessions/` | List / create chat sessions |
 
-**Manager / admin:** `POST /api/admin/buckets/`, grant/revoke access endpoints.
+**Manager / admin:** `POST /api/admin/buckets/`, grant/revoke access.  
+**Admin / manager / teacher:** `POST /api/admin/students/` — create student username+password (optional `bucket_id` grant).  
+**Mock tests:** `POST/GET /api/mock-tests/`, assign/publish/submit/results under `/api/mock-tests/{id}/…`.
 
 Auth: session cookie (browser) or `Authorization: Token …` (API).
 

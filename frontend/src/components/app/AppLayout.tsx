@@ -2,6 +2,8 @@ import { useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 import {
   BookOpen,
+  ClipboardList,
+  GraduationCap,
   LayoutDashboard,
   LogOut,
   MessageSquareText,
@@ -10,6 +12,8 @@ import {
   Presentation,
   Settings2,
   Sparkles,
+  Video,
+  type LucideIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -18,11 +22,51 @@ import { useAuth } from "@/lib/auth"
 
 const SIDEBAR_KEY = "education_ai_sidebar_collapsed"
 
-const nav = [
+type NavItem = {
+  to: string
+  end: boolean
+  label: string
+  icon: LucideIcon
+  requiresCreateStudents?: boolean
+  /** When true, hidden from student accounts */
+  staffOnly?: boolean
+  /** Student-facing label override */
+  studentLabel?: string
+}
+
+const nav: NavItem[] = [
   { to: "/app", end: true, label: "Home", icon: LayoutDashboard },
-  { to: "/app/buckets", end: false, label: "AI Buckets", icon: BookOpen },
-  { to: "/app/chat", end: false, label: "Chat", icon: MessageSquareText },
-  { to: "/app/ppt", end: false, label: "Create PPT", icon: Presentation },
+  { to: "/app/buckets", end: false, label: "AI Buckets", icon: BookOpen, staffOnly: true },
+  {
+    to: "/app/chat",
+    end: false,
+    label: "Chat",
+    studentLabel: "AI Chat",
+    icon: MessageSquareText,
+  },
+  { to: "/app/ppt", end: false, label: "Create PPT", icon: Presentation, staffOnly: true },
+  {
+    to: "/app/lectures",
+    end: false,
+    label: "Lectures",
+    studentLabel: "My Lectures",
+    icon: Video,
+  },
+  {
+    to: "/app/mock-tests",
+    end: false,
+    label: "Mock Tests",
+    studentLabel: "My Tests",
+    icon: ClipboardList,
+  },
+  {
+    to: "/app/students",
+    end: false,
+    label: "Students",
+    icon: GraduationCap,
+    requiresCreateStudents: true,
+    staffOnly: true,
+  },
   { to: "/app/settings", end: false, label: "Settings", icon: Settings2 },
 ]
 
@@ -31,8 +75,20 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const school = session?.school
+  const isStudent = session?.membership?.role === "student"
   const workspace =
-    location.pathname.startsWith("/app/chat") || location.pathname.startsWith("/app/ppt")
+    location.pathname.startsWith("/app/chat") ||
+    (!isStudent && location.pathname.startsWith("/app/ppt"))
+  const items = nav
+    .filter((item) => {
+      if (isStudent && item.staffOnly) return false
+      if (item.requiresCreateStudents && !session?.can_create_students) return false
+      return true
+    })
+    .map((item) => ({
+      ...item,
+      label: isStudent && item.studentLabel ? item.studentLabel : item.label,
+    }))
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -88,7 +144,7 @@ export function AppLayout() {
         </div>
 
         <nav className="flex flex-1 flex-col gap-0.5">
-          {nav.map((item) => (
+          {items.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -137,7 +193,7 @@ export function AppLayout() {
         <header className="flex items-center justify-between gap-3 border-b border-border/80 bg-white/70 px-3 py-2.5 md:hidden">
           <p className="font-display text-base text-[var(--brand)]">Education AI</p>
           <div className="flex gap-0.5 overflow-x-auto">
-            {nav.map((item) => (
+            {items.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
