@@ -26,7 +26,7 @@ def send_transactional_email(
     """Send a transactional email via Brevo SMTP API."""
     api_key = getattr(settings, "BREVO_API_KEY", "") or ""
     sender_email = getattr(settings, "BREVO_SENDER_EMAIL", "") or ""
-    sender_name = getattr(settings, "BREVO_SENDER_NAME", "Education AI") or "Education AI"
+    sender_name = getattr(settings, "BREVO_SENDER_NAME", "ClassKit") or "ClassKit"
     if not api_key:
         raise BrevoError("BREVO_API_KEY is not configured")
     if not sender_email:
@@ -66,7 +66,7 @@ def send_transactional_email(
 def send_otp_email(*, to_email: str, otp: str, organization_name: str = "") -> None:
     """Send a 6-digit onboarding OTP via Brevo transactional email API."""
     org = organization_name.strip() or "your organization"
-    subject = f"Your Education AI verification code: {otp}"
+    subject = f"Your ClassKit verification code: {otp}"
     text = (
         f"Your verification code for onboarding {org} is {otp}.\n\n"
         f"This code expires in {getattr(settings, 'OTP_TTL_SECONDS', 600) // 60} minutes.\n"

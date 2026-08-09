@@ -289,9 +289,9 @@ export function MockTestCreatePage() {
             className={cn(
               "rounded-full px-3 py-1",
               step === n
-                ? "bg-[var(--brand)] text-white"
+                ? "bg-brand text-white"
                 : step > n
-                  ? "bg-[#e6f4ef] text-[var(--brand)]"
+                  ? "bg-brand-soft text-brand"
                   : "bg-muted text-muted-foreground",
             )}
           >
@@ -818,7 +818,7 @@ function QuestionPreview({
                 key={i}
                 className={cn(
                   "rounded-lg px-2 py-1",
-                  ok ? "bg-[#e6f4ef] text-[var(--brand)]" : "text-muted-foreground",
+                  ok ? "bg-brand-soft text-brand" : "text-muted-foreground",
                 )}
               >
                 {String.fromCharCode(65 + i)}. {opt}
@@ -933,7 +933,7 @@ function QuestionEditor({
                 className={cn(
                   "size-8 shrink-0 rounded-lg border text-xs font-medium",
                   (q.correct_indices || []).includes(i)
-                    ? "border-[var(--brand)] bg-[#e6f4ef] text-[var(--brand)]"
+                    ? "border-brand bg-brand-soft text-brand"
                     : "border-border",
                 )}
               >

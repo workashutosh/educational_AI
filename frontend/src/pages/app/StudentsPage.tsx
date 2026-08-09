@@ -81,7 +81,7 @@ export function StudentsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 font-display text-3xl tracking-tight">
-            <GraduationCap className="size-7 text-[var(--brand)]" />
+            <GraduationCap className="size-7 text-brand" />
             Students
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -140,7 +140,7 @@ export function StudentsPage() {
 
         <div className="overflow-x-auto rounded-2xl border border-border/80 bg-white/80">
           <table className="w-full min-w-[36rem] text-left text-sm">
-            <thead className="border-b border-border/70 bg-[#e6f4ef]/40 text-xs tracking-wide text-muted-foreground uppercase">
+            <thead className="border-b border-border/70 bg-brand-soft/40 text-xs tracking-wide text-muted-foreground uppercase">
               <tr>
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Username</th>
@@ -158,7 +158,7 @@ export function StudentsPage() {
                 pageRows.map((s) => (
                   <tr
                     key={s.id}
-                    className="border-b border-border/50 last:border-0 hover:bg-[#e6f4ef]/25"
+                    className="border-b border-border/50 last:border-0 hover:bg-brand-soft/25"
                   >
                     <td className="px-4 py-3 font-medium">
                       {s.full_name || "—"}
@@ -219,7 +219,7 @@ export function StudentsPage() {
                         className={cn(
                           "flex size-8 items-center justify-center rounded-lg text-xs font-medium transition",
                           n === safePage
-                            ? "bg-[var(--brand)] text-white"
+                            ? "bg-brand text-white"
                             : "text-muted-foreground hover:bg-muted",
                         )}
                       >
@@ -383,7 +383,7 @@ function CreateStudentForm({
         </div>
       </form>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {ok ? <p className="text-sm text-[var(--brand)]">{ok}</p> : null}
+      {ok ? <p className="text-sm text-brand">{ok}</p> : null}
     </section>
   )
 }

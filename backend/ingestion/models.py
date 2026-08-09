@@ -7,6 +7,7 @@ from django.utils import timezone
 GB = 1 << 30
 DEFAULT_MAX_BUCKETS = 5
 DEFAULT_BUCKET_QUOTA_BYTES = GB  # 1 GB per bucket (pilot)
+FREE_TRIAL_MAX_USERS = 5  # free trial seat cap (0 elsewhere still means unlimited)
 
 
 class School(models.Model):

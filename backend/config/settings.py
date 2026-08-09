@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "rag_harness",
     "mock_tests",
     "lectures",
+    "engagement",
 ]
 
 MIDDLEWARE = [
@@ -137,6 +138,24 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 
+# Celery Beat — engagement digests (run: celery -A config beat -l info)
+from datetime import timedelta  # noqa: E402
+
+CELERY_BEAT_SCHEDULE = {
+    "engagement-teacher-daily-digest": {
+        "task": "engagement.send_teacher_daily_digests",
+        "schedule": timedelta(hours=24),
+        # Prefer crontab in production; timedelta keeps deps light for pilot
+    },
+    "engagement-student-weekly-digest": {
+        "task": "engagement.send_student_weekly_digests",
+        "schedule": timedelta(days=7),
+    },
+}
+
+# School-local calendar for streaks / digests
+SCHOOL_DEFAULT_TZ = env("SCHOOL_DEFAULT_TZ", default="Asia/Kolkata")
+
 # ---------------------------------------------------------------------------
 # LiteLLM → Google Gemini (Google AI Studio)
 #
@@ -162,7 +181,14 @@ if GEMINI_API_KEY:
 # ---------------------------------------------------------------------------
 EMBEDDING_MODEL = env("EMBEDDING_MODEL", default="BAAI/bge-small-en-v1.5")
 CHUNK_MAX_CHARS = env.int("CHUNK_MAX_CHARS", default=3200)
-CHUNK_OVERLAP_CHARS = env.int("CHUNK_OVERLAP_CHARS", default=320)
+CHUNK_OVERLAP_CHARS = env.int("CHUNK_OVERLAP_CHARS", default=640)
+# Cosine similarity floor after quality demotion; below this → no LLM call
+RAG_MIN_SCORE = env.float("RAG_MIN_SCORE", default=0.22)
+# Keep small — large top_k + neighbor expansion blows Groq free-tier TPM (12k).
+RAG_TOP_K = env.int("RAG_TOP_K", default=5)
+RAG_EXPAND_NEIGHBORS = env.bool("RAG_EXPAND_NEIGHBORS", default=True)
+RAG_MAX_CONTEXT_CHARS = env.int("RAG_MAX_CONTEXT_CHARS", default=7000)
+RAG_MAX_CHUNK_CHARS = env.int("RAG_MAX_CHUNK_CHARS", default=1100)
 
 # ---------------------------------------------------------------------------
 # Groq — the only LLM call anywhere in this pipeline: query-time answer
@@ -185,7 +211,7 @@ RAG_HARNESS_MAX_CONTEXT_CHARS = env.int("RAG_HARNESS_MAX_CONTEXT_CHARS", default
 # ---------------------------------------------------------------------------
 BREVO_API_KEY = env("BREVO_API_KEY", default="")
 BREVO_SENDER_EMAIL = env("BREVO_SENDER_EMAIL", default="")
-BREVO_SENDER_NAME = env("BREVO_SENDER_NAME", default="Education AI")
+BREVO_SENDER_NAME = env("BREVO_SENDER_NAME", default="ClassKit")
 # Used in result emails (link back to My Tests)
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://127.0.0.1:5173").rstrip("/")
 OTP_TTL_SECONDS = env.int("OTP_TTL_SECONDS", default=600)
@@ -206,11 +232,18 @@ MAX_UPLOAD_BYTES = env.int("MAX_UPLOAD_BYTES", default=50 * 1024 * 1024)
 
 # ---------------------------------------------------------------------------
 # Microsoft Graph — Teams online meetings for Lectures
-# https://learn.microsoft.com/en-us/graph/api/application-post-onlinemeetings
-# Requires OnlineMeetings.ReadWrite.All + application access policy.
+# Preferred: delegated OAuth (Connect Microsoft → POST /me/onlineMeetings).
+# Optional app-only: OnlineMeetings.ReadWrite.All + application access policy.
 # ---------------------------------------------------------------------------
 MS_GRAPH_TENANT_ID = env("MS_GRAPH_TENANT_ID", default="")
 MS_GRAPH_CLIENT_ID = env("MS_GRAPH_CLIENT_ID", default="")
 MS_GRAPH_CLIENT_SECRET = env("MS_GRAPH_CLIENT_SECRET", default="")
-# Entra object ID or UPN of the user who organizes meetings
+# Entra object ID or UPN of the user who organizes meetings (app-only mode)
 MS_GRAPH_ORGANIZER_USER_ID = env("MS_GRAPH_ORGANIZER_USER_ID", default="")
+# Delegated OAuth (teacher Connect Microsoft) — no access policy needed
+MS_GRAPH_REDIRECT_URI = env(
+    "MS_GRAPH_REDIRECT_URI",
+    default="http://127.0.0.1:8000/api/lectures/teams/callback/",
+)
+# organizations = any work/school tenant; or set to your tenant id for single-tenant apps
+MS_GRAPH_OAUTH_TENANT = env("MS_GRAPH_OAUTH_TENANT", default="organizations")

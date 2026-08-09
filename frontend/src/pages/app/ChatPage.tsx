@@ -27,6 +27,7 @@ export function ChatPage() {
   const [loadingChat, setLoadingChat] = useState(false)
   const [error, setError] = useState("")
   const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
 
   const setQuery = useCallback(
     (next: { bucket?: number | null; session?: number | null }) => {
@@ -68,7 +69,10 @@ export function ChatPage() {
   }, [bucketId, buckets, setQuery])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = messagesRef.current
+    if (!el) return
+    // Scroll only the messages pane — never scrollIntoView (that can shove the whole shell)
+    el.scrollTop = el.scrollHeight
   }, [history, busy])
 
   // Skip session→history sync while a send is in flight (avoids wiping the
@@ -149,6 +153,7 @@ export function ChatPage() {
       const res = await api<{
         answer: string
         sources: AskSource[]
+        suggestions?: string[]
         session?: { id: number; title: string }
       }>("/api/ask/", {
         method: "POST",
@@ -166,7 +171,12 @@ export function ChatPage() {
       setSessionId(finalSid)
       setHistory([
         ...nextHistory,
-        { role: "assistant", content: res.answer, sources: res.sources || [] },
+        {
+          role: "assistant",
+          content: res.answer,
+          sources: res.sources || [],
+          suggestions: res.suggestions || [],
+        },
       ])
       // Sync URL after messages are on screen + persisted
       setQuery({ session: finalSid })
@@ -193,7 +203,7 @@ export function ChatPage() {
 
   if (!buckets.length) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-muted-foreground">
+      <div className="flex h-full w-full items-center justify-center p-8 text-center text-muted-foreground">
         <div>
           <p className="font-medium text-foreground">No AI Buckets available</p>
           <p className="mt-1 text-sm">
@@ -207,10 +217,10 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full">
+    <div className="grid h-full w-full grid-cols-[16rem_minmax(0,1fr)] overflow-hidden bg-[#f3f6f8]">
       {/* History rail */}
-      <aside className="flex w-64 shrink-0 flex-col border-r border-border/80 bg-white/90">
-        <div className="space-y-3 border-b border-border/70 p-3">
+      <aside className="flex min-h-0 flex-col border-r border-border/80 bg-white">
+        <div className="shrink-0 space-y-3 border-b border-border/70 p-3">
           <Button type="button" className="w-full justify-start gap-2" onClick={newChat}>
             <MessageSquarePlus className="size-4" />
             New chat
@@ -253,7 +263,7 @@ export function ChatPage() {
                     className={cn(
                       "w-full rounded-lg px-2.5 py-2 text-left transition",
                       activeSessionId === s.id
-                        ? "bg-[#e6f4ef] text-[var(--brand)]"
+                        ? "bg-brand-soft text-brand"
                         : "hover:bg-muted text-foreground",
                     )}
                   >
@@ -273,9 +283,9 @@ export function ChatPage() {
         </div>
       </aside>
 
-      {/* Chat stage — full remaining width */}
-      <section className="flex min-w-0 flex-1 flex-col bg-[#f3f6f8]">
-        <header className="flex items-center justify-between gap-3 border-b border-border/70 bg-white/80 px-4 py-3">
+      {/* Stage: header | scrollable messages | pinned composer */}
+      <section className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+        <header className="flex items-center justify-between gap-3 border-b border-border/70 bg-white px-4 py-3">
           <div className="min-w-0">
             <h1 className="truncate font-display text-xl tracking-tight">
               {activeBucket?.name || "Chat"}
@@ -284,7 +294,6 @@ export function ChatPage() {
               {isStudent
                 ? "Ask questions from notes in your assigned AI Buckets"
                 : "Grounded answers from indexed notes"}
-              {sessionId ? ` · session #${sessionId}` : ""}
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={newChat}>
@@ -292,77 +301,104 @@ export function ChatPage() {
           </Button>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 lg:px-10">
-          {loadingChat ? (
-            <p className="text-sm text-muted-foreground">Loading chat…</p>
-          ) : null}
-          {!history.length && !busy && !loadingChat ? (
-            <div className="mx-auto max-w-lg py-16 text-center text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">Ask anything from this AI Bucket</p>
-              <p className="mt-2">Your chats are saved in History on the left.</p>
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                {[
-                  "Summarize the key topics",
-                  "Give an example from the notes",
-                  "What should I revise first?",
-                ].map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    className="rounded-full border border-border bg-white px-3 py-1.5 text-xs hover:border-[var(--brand)]"
-                    onClick={() => setInput(q)}
-                  >
-                    {q}
-                  </button>
-                ))}
+        <div ref={messagesRef} className="min-h-0 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+            {loadingChat ? (
+              <p className="text-sm text-muted-foreground">Loading chat…</p>
+            ) : null}
+            {!history.length && !busy && !loadingChat ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">Ask anything from this AI Bucket</p>
+                <p className="mt-2">Your chats are saved in History on the left.</p>
+                <div className="mt-4 flex flex-wrap justify-center gap-2">
+                  {[
+                    "Summarize the key topics",
+                    "Give an example from the notes",
+                    "What should I revise first?",
+                  ].map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      className="rounded-full border border-border bg-white px-3 py-1.5 text-xs hover:border-brand"
+                      onClick={() => setInput(q)}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : null}
-          {history.map((m, i) => (
-            <div
-              key={i}
-              className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
-            >
+            ) : null}
+            {history.map((m, i) => (
               <div
-                className={cn(
-                  "max-w-[min(48rem,92%)] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
-                  m.role === "user"
-                    ? "whitespace-pre-wrap bg-[#1e3a5f] text-white"
-                    : "border border-border/80 bg-white text-foreground",
-                )}
+                key={i}
+                className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
               >
-                {m.role === "assistant" ? (
-                  <RichAnswer content={m.content} sources={m.sources} />
-                ) : (
-                  m.content
-                )}
+                <div
+                  className={cn(
+                    "max-w-[min(40rem,100%)] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
+                    m.role === "user"
+                      ? "whitespace-pre-wrap bg-[#1e3a5f] text-white"
+                      : "border border-border/80 bg-white text-foreground",
+                  )}
+                >
+                  {m.role === "assistant" ? (
+                    <>
+                      <RichAnswer content={m.content} sources={m.sources} />
+                      {m.suggestions?.length && i === history.length - 1 ? (
+                        <div className="mt-3 flex flex-wrap gap-2 border-t border-border/60 pt-3">
+                          {m.suggestions.map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              className="rounded-lg border border-border bg-[#f7f9fd] px-2.5 py-1 text-xs text-foreground hover:border-brand"
+                              onClick={() => setInput(s)}
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    m.content
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-          {busy ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Thinking…
-            </div>
-          ) : null}
-          <div ref={bottomRef} />
+            ))}
+            {busy ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Thinking…
+              </div>
+            ) : null}
+            <div ref={bottomRef} className="h-px w-full shrink-0" />
+          </div>
         </div>
 
-        {error ? <p className="px-4 pb-1 text-sm text-destructive sm:px-6">{error}</p> : null}
-        <form
-          onSubmit={send}
-          className="flex gap-2 border-t border-border/70 bg-white/90 px-4 py-3 sm:px-6 lg:px-10"
-        >
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a question…"
-            disabled={busy || !bucketId}
-            className="h-11"
-          />
-          <Button type="submit" disabled={busy || !input.trim() || !bucketId} size="icon" className="size-11">
-            <SendHorizontal className="size-4" />
-          </Button>
-        </form>
+        <div className="border-t border-border/70 bg-white">
+          {error ? (
+            <p className="px-4 pt-2 text-sm text-destructive sm:px-6">{error}</p>
+          ) : null}
+          <form
+            onSubmit={send}
+            className="mx-auto flex w-full max-w-3xl gap-2 px-4 py-3 sm:px-6"
+          >
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask a question…"
+              disabled={busy || !bucketId}
+              className="h-11"
+            />
+            <Button
+              type="submit"
+              disabled={busy || !input.trim() || !bucketId}
+              size="icon"
+              className="size-11 shrink-0"
+            >
+              <SendHorizontal className="size-4" />
+            </Button>
+          </form>
+        </div>
       </section>
     </div>
   )

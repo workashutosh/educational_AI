@@ -1,11 +1,15 @@
 """Lecture APIs: schedule with Teams meeting, room payload (notes + AI bucket)."""
 from __future__ import annotations
 
+import logging
+
 from django.conf import settings
 from django.db.models import Q
+from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -17,9 +21,19 @@ from .serializers import CreateLectureSerializer, UpdateLectureSerializer
 from .services import (
     TeamsGraphError,
     TeamsNotConfigured,
+    build_oauth_authorize_url,
     create_teams_online_meeting,
+    disconnect_member,
+    exchange_code_for_tokens,
+    member_teams_connected,
+    oauth_app_ready,
+    parse_oauth_state,
+    save_oauth_tokens,
     teams_configured,
+    user_facing_teams_error,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _member(request) -> SchoolMembership:
@@ -42,6 +56,11 @@ def _can_view(member: SchoolMembership, lecture: Lecture) -> bool:
     return member.has_bucket_access(lecture.bucket)
 
 
+def _frontend_lectures_url(query: str = "") -> str:
+    base = getattr(settings, "FRONTEND_BASE_URL", "http://127.0.0.1:5173").rstrip("/")
+    return f"{base}/app/lectures{query}"
+
+
 def _lecture_payload(lecture: Lecture, member: SchoolMembership) -> dict:
     return {
         "id": lecture.id,
@@ -55,7 +74,11 @@ def _lecture_payload(lecture: Lecture, member: SchoolMembership) -> dict:
         "teams_join_url": lecture.teams_join_url,
         "teams_meeting_id": lecture.teams_meeting_id if _can_manage(member, lecture) else "",
         "teams_created": lecture.teams_created,
-        "teams_error": lecture.teams_error if _can_manage(member, lecture) else "",
+        "teams_error": (
+            user_facing_teams_error(lecture.teams_error)
+            if _can_manage(member, lecture)
+            else ""
+        ),
         "teams_organizer_upn": lecture.teams_organizer_upn,
         "created_by": lecture.created_by_id,
         "can_manage": _can_manage(member, lecture),
@@ -78,23 +101,105 @@ def _room_notes(bucket: SubjectBucket) -> list[dict]:
     return list(docs)
 
 
+def _apply_teams_meeting(lecture: Lecture, member: SchoolMembership) -> None:
+    meeting = create_teams_online_meeting(
+        subject=lecture.title,
+        start=lecture.starts_at,
+        end=lecture.ends_at,
+        member=member,
+    )
+    lecture.teams_meeting_id = meeting.meeting_id
+    lecture.teams_join_url = meeting.join_url
+    lecture.teams_organizer_upn = meeting.organizer_upn
+    lecture.teams_created = True
+    lecture.teams_error = ""
+
+
 class TeamsStatusView(APIView):
-    """GET /api/lectures/teams/status/ — whether Graph credentials are set."""
+    """GET /api/lectures/teams/status/"""
 
     permission_classes = [IsSchoolMember]
 
     def get(self, request):
         member = _member(request)
         if member.role == SchoolMembership.ROLE_STUDENT:
-            return Response({"configured": False})
+            return Response(
+                {
+                    "configured": False,
+                    "oauth_ready": False,
+                    "connected": False,
+                }
+            )
+        connected = member_teams_connected(member)
+        link = getattr(member, "microsoft_account", None) if connected else None
         return Response(
             {
                 "configured": teams_configured(),
-                "organizer_configured": bool(
-                    getattr(settings, "MS_GRAPH_ORGANIZER_USER_ID", "")
-                ),
+                "oauth_ready": oauth_app_ready(),
+                "connected": connected,
+                "ms_upn": getattr(link, "ms_upn", "") if link else "",
+                "display_name": getattr(link, "display_name", "") if link else "",
+                "connect_url": "/api/lectures/teams/connect/",
             }
         )
+
+
+class TeamsConnectView(APIView):
+    """GET /api/lectures/teams/connect/ — return Microsoft authorize URL (JSON)."""
+
+    permission_classes = [IsSchoolMember]
+
+    def get(self, request):
+        member = _member(request)
+        if member.role == SchoolMembership.ROLE_STUDENT:
+            return Response({"detail": "Forbidden"}, status=403)
+        try:
+            url = build_oauth_authorize_url(member_id=member.id)
+        except TeamsNotConfigured as exc:
+            return Response(
+                {"detail": user_facing_teams_error(str(exc))},
+                status=400,
+            )
+        # Return URL so the SPA can redirect with Token auth (browser nav can't).
+        return Response({"authorize_url": url})
+
+
+class TeamsOAuthCallbackView(APIView):
+    """GET /api/lectures/teams/callback/?code=&state= — Microsoft OAuth redirect."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        err = request.query_params.get("error")
+        if err:
+            return HttpResponseRedirect(
+                _frontend_lectures_url("?teams=error")
+            )
+        code = request.query_params.get("code") or ""
+        state = request.query_params.get("state") or ""
+        if not code or not state:
+            return HttpResponseRedirect(_frontend_lectures_url("?teams=error"))
+        try:
+            member_id = parse_oauth_state(state)
+            member = SchoolMembership.objects.get(pk=member_id, is_active=True)
+            payload = exchange_code_for_tokens(code)
+            save_oauth_tokens(member, payload)
+        except Exception as exc:
+            logger.warning("Teams OAuth callback failed: %s", exc, exc_info=True)
+            return HttpResponseRedirect(_frontend_lectures_url("?teams=error"))
+        return HttpResponseRedirect(_frontend_lectures_url("?teams=connected"))
+
+
+class TeamsDisconnectView(APIView):
+    permission_classes = [IsSchoolMember]
+
+    def post(self, request):
+        member = _member(request)
+        if member.role == SchoolMembership.ROLE_STUDENT:
+            return Response({"detail": "Forbidden"}, status=403)
+        disconnect_member(member)
+        return Response({"connected": False})
 
 
 class LectureListCreateView(APIView):
@@ -119,7 +224,6 @@ class LectureListCreateView(APIView):
                 status=Lecture.STATUS_CANCELLED
             )
         elif not member.is_manager_or_above:
-            # Teachers see lectures they created + others in buckets they access
             accessible = SubjectBucket.objects.filter(
                 school=member.school,
                 access_grants__member=member,
@@ -164,22 +268,11 @@ class LectureListCreateView(APIView):
         want_teams = bool(vd.get("create_teams_meeting", True))
         if want_teams and not lecture.teams_join_url:
             try:
-                meeting = create_teams_online_meeting(
-                    subject=lecture.title,
-                    start=lecture.starts_at,
-                    end=lecture.ends_at,
-                )
-                lecture.teams_meeting_id = meeting.meeting_id
-                lecture.teams_join_url = meeting.join_url
-                lecture.teams_organizer_upn = meeting.organizer_upn
-                lecture.teams_created = True
-            except TeamsNotConfigured:
-                lecture.teams_error = (
-                    "Teams Graph not configured — add a join URL manually, "
-                    "or set MS_GRAPH_* env vars."
-                )
+                _apply_teams_meeting(lecture, member)
+            except TeamsNotConfigured as exc:
+                lecture.teams_error = user_facing_teams_error(str(exc))
             except TeamsGraphError as exc:
-                lecture.teams_error = str(exc)
+                lecture.teams_error = user_facing_teams_error(str(exc))
 
         lecture.save()
         return Response(
@@ -225,11 +318,6 @@ class LectureDetailView(APIView):
 
 
 class LectureRoomView(APIView):
-    """
-    GET /api/lectures/{id}/room/ — payload for the lecture console:
-    meeting link, indexed notes for the bucket, AI ask hints.
-    """
-
     permission_classes = [IsSchoolMember]
 
     def get(self, request, pk):
@@ -275,11 +363,17 @@ class LectureEndView(APIView):
         if not _can_manage(member, lecture):
             return Response({"detail": "Forbidden"}, status=403)
         lecture.mark_ended()
+        try:
+            from engagement.tasks import on_lecture_ended
+
+            on_lecture_ended.delay(lecture.pk)
+        except Exception:
+            pass
         return Response(_lecture_payload(lecture, member))
 
 
 class LectureCreateTeamsView(APIView):
-    """Retry creating a Teams meeting for an existing lecture."""
+    """Create / retry Teams meeting (delegated preferred)."""
 
     permission_classes = [IsSchoolMember]
 
@@ -289,23 +383,16 @@ class LectureCreateTeamsView(APIView):
         if not _can_manage(member, lecture):
             return Response({"detail": "Forbidden"}, status=403)
         try:
-            meeting = create_teams_online_meeting(
-                subject=lecture.title,
-                start=lecture.starts_at,
-                end=lecture.ends_at,
-            )
+            _apply_teams_meeting(lecture, member)
         except TeamsNotConfigured as exc:
-            return Response({"detail": str(exc)}, status=400)
+            msg = user_facing_teams_error(str(exc))
+            return Response({"detail": msg}, status=400)
         except TeamsGraphError as exc:
-            lecture.teams_error = str(exc)
+            msg = user_facing_teams_error(str(exc))
+            lecture.teams_error = msg
             lecture.save(update_fields=["teams_error", "updated_at"])
-            return Response({"detail": str(exc)}, status=502)
+            return Response({"detail": msg}, status=502)
 
-        lecture.teams_meeting_id = meeting.meeting_id
-        lecture.teams_join_url = meeting.join_url
-        lecture.teams_organizer_upn = meeting.organizer_upn
-        lecture.teams_created = True
-        lecture.teams_error = ""
         lecture.save(
             update_fields=[
                 "teams_meeting_id",

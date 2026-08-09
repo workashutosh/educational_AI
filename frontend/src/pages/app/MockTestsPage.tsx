@@ -59,7 +59,7 @@ export function MockTestsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 font-display text-3xl tracking-tight">
-            <ClipboardList className="size-7 text-[var(--brand)]" />
+            <ClipboardList className="size-7 text-brand" />
             {isStudent ? "My Tests" : "Mock Tests"}
           </h1>
           <p className="mt-1 text-muted-foreground">
@@ -105,7 +105,7 @@ export function MockTestsPage() {
                     : `/app/mock-tests/${t.id}/take`
                   : `/app/mock-tests/${t.id}`
               }
-              className="block rounded-2xl border border-border/80 bg-white/80 p-4 transition hover:border-[var(--brand)] hover:bg-[#e6f4ef]/40"
+              className="block rounded-2xl border border-border/80 bg-white/80 p-4 transition hover:border-brand hover:bg-brand-soft/40"
             >
               <div className="flex items-start justify-between gap-2">
                 <p className="font-medium leading-snug">{t.title}</p>
@@ -124,7 +124,7 @@ export function MockTestsPage() {
                         Submitted — waiting for teacher review
                       </span>
                     ) : (
-                      <span className="font-medium text-[var(--brand)]">
+                      <span className="font-medium text-brand">
                         Score {t.my_score}/{t.my_max_score} ({t.my_percent}%)
                       </span>
                     )
@@ -150,7 +150,7 @@ export function MockTestsPage() {
 function StatusBadge({ status }: { status: string }) {
   const tone =
     status === "published" || status === "submitted"
-      ? "bg-[#e6f4ef] text-[var(--brand)]"
+      ? "bg-brand-soft text-brand"
       : status === "closed"
         ? "bg-muted text-muted-foreground"
         : status === "in_progress"

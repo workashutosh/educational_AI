@@ -6,9 +6,44 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
+BACKEND_PORT=8000
+FRONTEND_PORT=5173
+
 BACKEND_PID=""
 CELERY_PID=""
 FRONTEND_PID=""
+
+# Free a TCP listen port (macOS / Linux). Kills whatever is bound to it.
+free_port() {
+  local port="$1"
+  local pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    # Linux fallback
+    fuser -k "${port}/tcp" >/dev/null 2>&1 || true
+    return 0
+  else
+    echo "Warning: cannot free port $port (no lsof/fuser)."
+    return 0
+  fi
+
+  if [[ -z "${pids}" ]]; then
+    return 0
+  fi
+
+  echo "Port $port in use — stopping PID(s): $(echo "$pids" | tr '\n' ' ')"
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  sleep 0.4
+  # Force if still listening
+  pids="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -n "${pids}" ]]; then
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+    sleep 0.2
+  fi
+}
 
 cleanup() {
   echo ""
@@ -76,8 +111,12 @@ source "$ROOT/backend/.venv/bin/activate"
 echo "Running migrations…"
 (cd "$ROOT/backend" && python manage.py migrate --noinput)
 
-echo "Starting Django → http://127.0.0.1:8000"
-(cd "$ROOT/backend" && python manage.py runserver) &
+echo "Freeing ports ${BACKEND_PORT} and ${FRONTEND_PORT} if needed…"
+free_port "$BACKEND_PORT"
+free_port "$FRONTEND_PORT"
+
+echo "Starting Django → http://127.0.0.1:${BACKEND_PORT}"
+(cd "$ROOT/backend" && python manage.py runserver "127.0.0.1:${BACKEND_PORT}") &
 BACKEND_PID=$!
 
 echo "Starting Celery worker…"
@@ -88,14 +127,14 @@ echo "Starting Celery worker…"
 ) &
 CELERY_PID=$!
 
-echo "Starting frontend → http://127.0.0.1:5173"
-(cd "$ROOT/frontend" && npm run dev -- --host 127.0.0.1 --port 5173) &
+echo "Starting frontend → http://127.0.0.1:${FRONTEND_PORT}"
+(cd "$ROOT/frontend" && npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT") &
 FRONTEND_PID=$!
 
 echo ""
 echo "All services running. Press Ctrl+C to stop."
-echo "  App:     http://127.0.0.1:5173/"
-echo "  API docs: http://127.0.0.1:8000/api/docs/"
+echo "  App:     http://127.0.0.1:${FRONTEND_PORT}/"
+echo "  API docs: http://127.0.0.1:${BACKEND_PORT}/api/docs/"
 echo ""
 
 wait

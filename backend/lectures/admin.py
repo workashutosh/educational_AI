@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Lecture
+from .models import Lecture, MicrosoftAccountLink
 
 
 @admin.register(Lecture)
@@ -16,3 +16,10 @@ class LectureAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "teams_created", "school")
     search_fields = ("title", "teams_meeting_id", "teams_join_url")
+
+
+@admin.register(MicrosoftAccountLink)
+class MicrosoftAccountLinkAdmin(admin.ModelAdmin):
+    list_display = ("member", "ms_upn", "display_name", "connected_at", "expires_at")
+    search_fields = ("ms_upn", "display_name", "ms_user_id")
+    readonly_fields = ("access_token", "refresh_token")

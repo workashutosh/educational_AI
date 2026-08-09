@@ -17,6 +17,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
+from .llm_errors import raise_for_llm_response
 from .retrieval_service import search_bucket
 
 logger = logging.getLogger(__name__)
@@ -162,8 +163,7 @@ def _fetch_outline(api_key: str, model: str, user_msg: str, slide_count: int) ->
             json=payload,
             timeout=90,
         )
-    if response.status_code != 200:
-        raise RuntimeError(f"Groq API error ({response.status_code}): {response.text}")
+    raise_for_llm_response(response, provider="Groq")
 
     raw = response.json()["choices"][0]["message"]["content"].strip()
     data = _parse_outline_json(raw)

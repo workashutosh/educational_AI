@@ -67,6 +67,7 @@ export type ChatMessage = {
   role: "user" | "assistant"
   content: string
   sources?: AskSource[]
+  suggestions?: string[]
   retrieval_query?: string
   model?: string
   created_at?: string
@@ -143,6 +144,43 @@ type ApiError = {
   errors?: Record<string, string[]>
 }
 
+/** Never show provider dumps, env vars, status codes, or admin setup hints in the UI. */
+function sanitizeUserFacingError(message: string, status: number): string {
+  const msg = (message || "").trim()
+  const lower = msg.toLowerCase()
+  const looksTechnical =
+    lower.includes("rate limit") ||
+    lower.includes("tokens per minute") ||
+    lower.includes("groq") ||
+    lower.includes("org_") ||
+    lower.includes("service tier") ||
+    lower.includes("ms_graph") ||
+    lower.includes(".env") ||
+    lower.includes("setup_teams") ||
+    lower.includes("client_id") ||
+    lower.includes("client_secret") ||
+    lower.includes("tenant_id") ||
+    lower.includes("traceback") ||
+    lower.includes("status_code") ||
+    /request failed\s*\(\d+\)/i.test(msg) ||
+    (msg.includes('{"error"') && lower.includes("limit")) ||
+    /api error\s*\(\d+\)/i.test(msg)
+
+  if (looksTechnical || status === 429) {
+    if (status === 429 || lower.includes("rate limit") || lower.includes("groq")) {
+      return "The AI service is busy right now. Please wait a few seconds and try again."
+    }
+    return "Something went wrong. Please try again in a moment."
+  }
+  if (status >= 500) {
+    return "Something went wrong. Please try again in a moment."
+  }
+  if (msg.length > 180) {
+    return "Something went wrong. Please try again in a moment."
+  }
+  return msg || "Something went wrong. Please try again in a moment."
+}
+
 function parseError(data: unknown, status: number): Error {
   const err = (data || {}) as ApiError
   const fieldErrors = err.errors
@@ -150,7 +188,8 @@ function parseError(data: unknown, status: number): Error {
         .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(" ") : String(v)}`)
         .join(" · ")
     : ""
-  return new Error(err.detail || fieldErrors || `Request failed (${status})`)
+  const raw = err.detail || fieldErrors || `Request failed (${status})`
+  return new Error(sanitizeUserFacingError(raw, status))
 }
 
 export async function api<T>(

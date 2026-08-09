@@ -113,31 +113,74 @@ class _Segment:
     # segment's own physical PDF text line (not a new line/paragraph) — lets
     # us recognize "numeral/drop-cap run, then bold title text" as one heading
     # even though the two runs differ in size.
+    is_table: bool = False  # multi-line markdown table; keep newlines intact
+    y0: float = 0.0  # top of bbox for reading-order merge with tables
 
 
 def _extract_page_segments(page) -> list[_Segment]:
     """
     Reading-order text segments with font size/weight, from PyMuPDF's dict
-    layout. Segments are split wherever a PDF text line's own spans change
-    size — this matters because textbook layouts routinely fuse an inline
-    subsection number+title with the start of its paragraph on one physical
-    line (e.g. "1.2  ELECTRIC CHARGE Historically the credit..."); splitting
-    at the span-size boundary recovers the heading instead of losing it into
-    the paragraph body.
+    layout. When tables are detected, emit GitHub-flavored markdown tables
+    (with headers) and skip the raw spans inside those table bboxes so
+    matrices are not flattened into unlabeled number soup.
     """
-    segments: list[_Segment] = []
+    ordered: list[_Segment] = []
+    table_rects: list[tuple[float, float, float, float]] = []
+
+    try:
+        finder = page.find_tables()
+        tables = list(getattr(finder, "tables", None) or [])
+    except Exception:
+        tables = []
+
+    for table in tables:
+        try:
+            bbox = tuple(float(x) for x in table.bbox)
+            table_rects.append(bbox)  # type: ignore[arg-type]
+            md = _table_to_markdown(table)
+            if md.strip():
+                ordered.append(
+                    _Segment(
+                        text=md,
+                        size=11.0,
+                        bold=False,
+                        continues_line=False,
+                        is_table=True,
+                        y0=bbox[1],
+                    )
+                )
+        except Exception:
+            logger.debug(
+                "table extract failed on page %s",
+                getattr(page, "number", "?"),
+                exc_info=True,
+            )
+
+    def _in_table(bbox) -> bool:
+        if not table_rects or not bbox:
+            return False
+        x0, y0, x1, y1 = bbox
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        for tx0, ty0, tx1, ty1 in table_rects:
+            if tx0 <= cx <= tx1 and ty0 <= cy <= ty1:
+                return True
+        return False
+
     raw = page.get_text("dict")
-    # PyMuPDF's block order follows the PDF content stream, not necessarily
-    # visual layout — decorative elements (e.g. a sidebar chapter-title strip)
-    # are often drawn out of band and can land anywhere in that stream. Sort
-    # top-to-bottom, then left-to-right so heading detection sees the title
-    # before the body text that follows it, not after.
     blocks = sorted(
         raw.get("blocks", []),
-        key=lambda b: (round(b.get("bbox", (0, 0, 0, 0))[1]), b.get("bbox", (0, 0, 0, 0))[0]),
+        key=lambda b: (
+            round(b.get("bbox", (0, 0, 0, 0))[1]),
+            b.get("bbox", (0, 0, 0, 0))[0],
+        ),
     )
     for block in blocks:
+        if block.get("type", 0) != 0:
+            continue
+        if _in_table(block.get("bbox")):
+            continue
         for line in block.get("lines", []):
+            line_y = float(line.get("bbox", (0, 0, 0, 0))[1])
             run_text: list[str] = []
             run_size: float | None = None
             run_bold = False
@@ -151,12 +194,13 @@ def _extract_page_segments(page) -> list[_Segment]:
                 if run_size is not None and size != run_size:
                     joined = "".join(run_text).strip()
                     if joined:
-                        segments.append(
+                        ordered.append(
                             _Segment(
                                 text=joined,
                                 size=run_size,
                                 bold=run_bold,
                                 continues_line=not first_run_in_line,
+                                y0=line_y,
                             )
                         )
                         first_run_in_line = False
@@ -166,15 +210,45 @@ def _extract_page_segments(page) -> list[_Segment]:
                 run_bold = run_bold or bold
             joined = "".join(run_text).strip()
             if joined:
-                segments.append(
+                ordered.append(
                     _Segment(
                         text=joined,
                         size=run_size or 0,
                         bold=run_bold,
                         continues_line=not first_run_in_line,
+                        y0=line_y,
                     )
                 )
-    return segments
+    ordered.sort(key=lambda s: (round(s.y0), 0 if s.is_table else 1))
+    return ordered
+
+
+def _table_to_markdown(table) -> str:
+    """Render a PyMuPDF table as markdown so row/column headers stay attached."""
+    data = table.extract()
+    if not data:
+        return ""
+    rows = [[(c or "").replace("\n", " ").strip() for c in row] for row in data]
+    rows = [r for r in rows if any(c for c in r)]
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    header = rows[0]
+    body = rows[1:] if len(rows) > 1 else []
+    # If the "header" is all numeric, invent column labels so values stay keyed
+    if header and all(
+        (not c) or re.fullmatch(r"[-+]?\d+(?:[.,]\d+)?", c) for c in header
+    ):
+        header = [f"C{i + 1}" for i in range(width)]
+        body = rows
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    for r in body:
+        lines.append("| " + " | ".join(r) + " |")
+    return "\n".join(lines)
 
 
 def _detect_boilerplate(pages: list[list[_Segment]]) -> set[str]:
@@ -278,6 +352,12 @@ def _segments_to_markdown(segments: list[_Segment], heading_levels: dict[float, 
             pending = None
 
     for seg in segments:
+        if seg.is_table:
+            flush_paragraph()
+            flush_heading()
+            out.append(seg.text.strip())
+            continue
+
         level = heading_levels.get(seg.size)
         is_heading = _looks_like_heading(seg, level)
 

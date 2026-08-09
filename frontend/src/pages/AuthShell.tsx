@@ -1,17 +1,19 @@
 import type { ReactNode } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 
+import { BrandLogo } from "@/components/BrandLogo"
 import { Button } from "@/components/ui/button"
 
+const AUTH_PANEL_IMAGE =
+  "https://i.pinimg.com/736x/30/41/7d/30417d9aeb0f64beba68227a1fd34726.jpg"
+
 export function AuthShell({
-  brand = "Education AI",
   title,
   subtitle,
   children,
   footer,
   wide = false,
 }: {
-  brand?: string
   title: string
   subtitle?: string
   children: ReactNode
@@ -25,23 +27,28 @@ export function AuthShell({
   const maxW = wide ? "max-w-md" : "max-w-sm"
 
   return (
-    <div className="flex min-h-svh w-full flex-col bg-[#f3f6f8] lg:flex-row">
+    <div className="flex min-h-svh w-full flex-col bg-background lg:flex-row">
       <aside
         className={`relative h-44 w-full shrink-0 overflow-hidden sm:h-56 lg:h-auto lg:min-h-svh ${leftW}`}
       >
         <img
-          src="/auth-panel.jpg"
+          src={AUTH_PANEL_IMAGE}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover object-center"
         />
         <div
           aria-hidden
-          className="absolute inset-0 bg-gradient-to-t from-[#0b6e4f]/60 via-[#1a2332]/20 to-transparent"
+          className="absolute inset-0 bg-gradient-to-t from-[#121826]/75 via-[#121826]/10 to-transparent"
         />
         <div className="absolute inset-x-0 bottom-0 p-5 text-white lg:p-10">
-          <p className="font-display text-2xl tracking-tight lg:text-3xl">Education AI</p>
-          <p className="mt-1 hidden max-w-md text-base leading-relaxed text-white/85 sm:block">
-            Notes that answer back — grounded in what your school actually teaches.
+          <BrandLogo
+            to={false}
+            size={40}
+            className="text-white"
+            wordmarkClassName="text-2xl tracking-tight text-white lg:text-3xl"
+          />
+          <p className="mt-2 hidden max-w-md text-base leading-relaxed text-white/85 sm:block">
+            Making Learning Easy
           </p>
         </div>
       </aside>
@@ -50,12 +57,9 @@ export function AuthShell({
         className={`flex w-full flex-1 flex-col justify-center overflow-y-auto px-5 py-8 lg:h-svh lg:px-8 xl:px-10 ${rightW}`}
       >
         <div className={`mx-auto w-full ${maxW}`}>
-          <Link
-            to="/"
-            className="mb-5 inline-block font-display text-sm tracking-[0.14em] uppercase text-[var(--brand)]"
-          >
-            {brand}
-          </Link>
+          <div className="mb-5">
+            <BrandLogo size={28} wordmarkClassName="text-base text-brand" />
+          </div>
           <h1 className="font-display text-3xl tracking-tight text-foreground">{title}</h1>
           {subtitle ? (
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{subtitle}</p>

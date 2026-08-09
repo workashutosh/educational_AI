@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/harness/", include("rag_harness.urls")),
     path("api/mock-tests/", include("mock_tests.urls")),
     path("api/lectures/", include("lectures.urls")),
+    path("api/engagement/", include("engagement.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
 ]

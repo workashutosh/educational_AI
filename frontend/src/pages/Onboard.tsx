@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react"
 
+import { BrandLogo } from "@/components/BrandLogo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -25,6 +26,9 @@ type Step = 1 | 2 | 3
 
 const DEFAULT_MAX_BUCKETS = 5
 const DEFAULT_BUCKET_GB = 1
+const FREE_TRIAL_MAX_USERS = 5
+const FREE_BUCKET_SLOTS = 5
+const SIZE_OPTIONS_GB = [1] as const
 
 export function OnboardPage() {
   const { session, setSession, loading } = useAuth()
@@ -51,7 +55,7 @@ export function OnboardPage() {
   const [plan, setPlan] = useState({
     max_buckets: DEFAULT_MAX_BUCKETS,
     bucket_quota_gb: DEFAULT_BUCKET_GB,
-    max_users: 0,
+    max_users: FREE_TRIAL_MAX_USERS,
     max_managers: 0,
   })
 
@@ -150,8 +154,14 @@ export function OnboardPage() {
             skip: false,
             max_buckets: Number(plan.max_buckets) || DEFAULT_MAX_BUCKETS,
             bucket_quota_gb: Number(plan.bucket_quota_gb) || DEFAULT_BUCKET_GB,
-            max_users: Number(plan.max_users) || 0,
-            max_managers: Number(plan.max_managers) || 0,
+            max_users: Math.min(
+              FREE_TRIAL_MAX_USERS,
+              Math.max(0, Number(plan.max_users) || FREE_TRIAL_MAX_USERS),
+            ),
+            max_managers: Math.min(
+              FREE_TRIAL_MAX_USERS,
+              Math.max(0, Number(plan.max_managers) || 0),
+            ),
           }
       const data = await api<Session>("/api/auth/onboard/complete/", {
         method: "POST",
@@ -188,21 +198,14 @@ export function OnboardPage() {
       <aside className="relative flex w-full flex-col justify-between overflow-hidden border-b border-border/60 px-6 py-8 sm:px-10 lg:w-[42%] lg:border-b-0 lg:border-r lg:px-12 lg:py-12">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,#d8ebe3_0%,transparent_55%),linear-gradient(165deg,#eef5f8_0%,#f7faf8_45%,#e8f2ee_100%)]"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,#d6e4f9_0%,transparent_55%),linear-gradient(165deg,#eef3fb_0%,#f7f9fd_45%,#e8f0fc_100%)]"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute -right-16 top-24 size-64 rounded-full bg-[var(--brand)]/8 blur-3xl"
+          className="pointer-events-none absolute -right-16 top-24 size-64 rounded-full bg-brand/8 blur-3xl"
         />
         <div className="relative z-[1]">
-          <Link to="/" className="inline-flex items-center gap-2">
-            <span className="flex size-9 items-center justify-center rounded-lg bg-[var(--brand)] text-sm font-semibold text-white">
-              AI
-            </span>
-            <span className="font-display text-lg tracking-tight text-foreground">
-              Education AI
-            </span>
-          </Link>
+          <BrandLogo size={36} wordmarkClassName="text-lg tracking-tight text-foreground" />
           <h1 className="mt-10 font-display text-3xl leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.65rem]">
             Create your school account
           </h1>
@@ -220,7 +223,7 @@ export function OnboardPage() {
               ] as const
             ).map(([Icon, text]) => (
               <li key={text} className="flex items-start gap-3 text-sm text-foreground/90">
-                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-white/80 text-[var(--brand)] shadow-sm ring-1 ring-[var(--brand)]/15">
+                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-white/80 text-brand shadow-sm ring-1 ring-brand/15">
                   <Icon className="size-4" />
                 </span>
                 <span className="pt-1.5 leading-snug">{text}</span>
@@ -230,7 +233,7 @@ export function OnboardPage() {
         </div>
         <p className="relative z-[1] mt-10 hidden text-xs text-muted-foreground lg:block">
           Already have an account?{" "}
-          <Link to="/login" className="font-medium text-[var(--brand)] hover:underline">
+          <Link to="/login" className="font-medium text-brand hover:underline">
             Sign in
           </Link>
         </p>
@@ -247,7 +250,7 @@ export function OnboardPage() {
           </Link>
           <Link
             to="/login"
-            className="text-sm font-medium text-[var(--brand)] hover:underline"
+            className="text-sm font-medium text-brand hover:underline"
           >
             Sign in
           </Link>
@@ -264,7 +267,7 @@ export function OnboardPage() {
                   key={n}
                   className={cn(
                     "h-1 flex-1 rounded-full transition-colors",
-                    n <= step ? "bg-[var(--brand)]" : "bg-border",
+                    n <= step ? "bg-brand" : "bg-border",
                   )}
                 />
               ))}
@@ -335,7 +338,7 @@ export function OnboardPage() {
                   <label className="flex items-start gap-2.5 text-sm text-muted-foreground">
                     <input
                       type="checkbox"
-                      className="mt-1 size-4 rounded border-input accent-[var(--brand)]"
+                      className="mt-1 size-4 rounded border-input accent-brand"
                       checked={form.privacy_consent}
                       onChange={(e) => setField("privacy_consent", e.target.checked)}
                       required
@@ -354,7 +357,7 @@ export function OnboardPage() {
 
               {step === 2 ? (
                 <form className="space-y-4" onSubmit={verifyOtp}>
-                  <div className="rounded-xl border border-[#cfe8dc] bg-[#e6f4ef]/50 px-3 py-2.5 text-sm text-[var(--brand)]">
+                  <div className="rounded-xl border border-brand-soft-border bg-brand-soft/50 px-3 py-2.5 text-sm text-brand">
                     <span className="inline-flex items-center gap-1.5">
                       <CheckCircle2 className="size-4" />
                       Code sent to {maskedEmail}
@@ -424,7 +427,7 @@ export function OnboardPage() {
             <Link to="/join" className="hover:text-foreground">
               Join school
             </Link>
-            <span className="ml-auto">© Education AI</span>
+            <span className="ml-auto">© ClassKit</span>
           </footer>
         </div>
       </section>
@@ -474,9 +477,6 @@ type PlanState = {
   max_managers: number
 }
 
-const FREE_BUCKET_SLOTS = 5
-const SIZE_OPTIONS_GB = [1] as const
-
 function BucketPlanStep({
   plan,
   setPlan,
@@ -516,8 +516,8 @@ function BucketPlanStep({
                 onClick={() => setPlan((p) => ({ ...p, max_buckets: n }))}
                 className={`group relative flex flex-col items-center rounded-xl border px-2 py-3 transition ${
                   active
-                    ? "border-[var(--brand)] bg-[#e6f4ef] shadow-sm"
-                    : "border-border/80 bg-white/70 hover:border-[var(--brand)]/40"
+                    ? "border-brand bg-brand-soft shadow-sm"
+                    : "border-border/80 bg-white/70 hover:border-brand/40"
                 }`}
                 aria-pressed={active}
                 aria-label={`${n} AI Bucket${n === 1 ? "" : "s"}`}
@@ -525,7 +525,7 @@ function BucketPlanStep({
                 <BucketIcon filled={active} fillRatio={plan.bucket_quota_gb / 5} />
                 <span
                   className={`mt-1.5 text-xs font-medium ${
-                    active ? "text-[var(--brand)]" : "text-muted-foreground"
+                    active ? "text-brand" : "text-muted-foreground"
                   }`}
                 >
                   AI Bucket {n}
@@ -560,8 +560,8 @@ function BucketPlanStep({
                 onClick={() => setPlan((p) => ({ ...p, bucket_quota_gb: gb }))}
                 className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
                   active
-                    ? "bg-[var(--brand)] text-white"
-                    : "border border-border bg-white text-muted-foreground hover:border-[var(--brand)]/50"
+                    ? "bg-brand text-white"
+                    : "border border-border bg-white text-muted-foreground hover:border-brand/50"
                 }`}
               >
                 {gb} GB
@@ -583,13 +583,18 @@ function BucketPlanStep({
         <SeatStepper
           label="Users"
           value={plan.max_users}
+          max={FREE_TRIAL_MAX_USERS}
           onChange={(v) => setPlan((p) => ({ ...p, max_users: v }))}
         />
         <SeatStepper
           label="Managers"
           value={plan.max_managers}
+          max={FREE_TRIAL_MAX_USERS}
           onChange={(v) => setPlan((p) => ({ ...p, max_managers: v }))}
         />
+        <p className="text-xs text-muted-foreground">
+          Free trial allows up to {FREE_TRIAL_MAX_USERS} users.
+        </p>
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -615,10 +620,12 @@ function SeatStepper({
   label,
   value,
   onChange,
+  max = 999,
 }: {
   label: string
   value: number
   onChange: (v: number) => void
+  max?: number
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -626,8 +633,9 @@ function SeatStepper({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none hover:bg-muted"
+          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none hover:bg-muted disabled:opacity-40"
           onClick={() => onChange(Math.max(0, value - 1))}
+          disabled={value <= 0}
           aria-label={`Decrease ${label}`}
         >
           −
@@ -635,8 +643,9 @@ function SeatStepper({
         <span className="w-8 text-center text-sm font-semibold tabular-nums">{value}</span>
         <button
           type="button"
-          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none hover:bg-muted"
-          onClick={() => onChange(Math.min(999, value + 1))}
+          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none hover:bg-muted disabled:opacity-40"
+          onClick={() => onChange(Math.min(max, value + 1))}
+          disabled={value >= max}
           aria-label={`Increase ${label}`}
         >
           +
@@ -656,8 +665,8 @@ function BucketIcon({
   dashed?: boolean
 }) {
   const fillH = Math.max(0.15, Math.min(0.85, fillRatio))
-  const stroke = filled ? "#0b6e4f" : dashed ? "#94a3b8" : "#8a9aab"
-  const liquid = filled ? "#0b6e4f" : "#cbd5e1"
+  const stroke = filled ? "var(--brand)" : dashed ? "#94a3b8" : "#8a9aab"
+  const liquid = filled ? "var(--brand)" : "#cbd5e1"
 
   return (
     <svg viewBox="0 0 64 72" className="h-14 w-12" aria-hidden>

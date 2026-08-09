@@ -127,11 +127,11 @@ export function CreatePptPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div className="flex h-full w-full min-h-0 flex-col overflow-hidden">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-white/90 px-4 py-3 sm:px-6">
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 font-display text-xl tracking-tight">
-            <Presentation className="size-5 text-[var(--brand)]" />
+            <Presentation className="size-5 text-brand" />
             Create PPT
           </h1>
           <p className="text-xs text-muted-foreground">
@@ -206,7 +206,7 @@ export function CreatePptPage() {
                     className={cn(
                       "rounded-lg border px-2.5 py-1 text-xs font-medium transition",
                       slideCount === n
-                        ? "border-[var(--brand)] bg-[#e6f4ef] text-[var(--brand)]"
+                        ? "border-brand bg-brand-soft text-brand"
                         : "border-border/80 text-muted-foreground hover:border-border",
                     )}
                   >
@@ -222,7 +222,7 @@ export function CreatePptPage() {
           </form>
           {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
           {doneName ? (
-            <p className="mt-3 text-sm text-[var(--brand)]">Downloaded {doneName}</p>
+            <p className="mt-3 text-sm text-brand">Downloaded {doneName}</p>
           ) : null}
         </div>
 
@@ -231,7 +231,7 @@ export function CreatePptPage() {
           {!outline && !busy ? (
             <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-border/80 bg-white/50 text-center text-sm text-muted-foreground">
               <div className="px-6 py-16">
-                <Presentation className="mx-auto mb-3 size-8 text-[var(--brand)]/50" />
+                <Presentation className="mx-auto mb-3 size-8 text-brand/50" />
                 <p className="font-medium text-foreground">Slide preview</p>
                 <p className="mt-1">Generate a preview to browse slides here at full width.</p>
               </div>
@@ -284,24 +284,24 @@ export function CreatePptPage() {
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-[#f7faf8] to-[#eef5f1] shadow-sm">
+              <div className="overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-[#f7f9fd] to-[#eef5f1] shadow-sm">
                 <div className="aspect-[16/9] p-6 sm:p-10 lg:p-12">
                   {current.kind === "title" ? (
                     <div className="flex h-full flex-col justify-center">
-                      <p className="font-display text-3xl tracking-tight text-[var(--brand)] sm:text-4xl">
+                      <p className="font-display text-3xl tracking-tight text-brand sm:text-4xl">
                         {current.heading}
                       </p>
                       <p className="mt-4 text-base text-muted-foreground">{current.bullets[0]}</p>
                     </div>
                   ) : (
                     <div className="flex h-full flex-col">
-                      <h3 className="font-display text-2xl tracking-tight text-[var(--brand)] sm:text-3xl">
+                      <h3 className="font-display text-2xl tracking-tight text-brand sm:text-3xl">
                         {current.heading}
                       </h3>
                       <ul className="mt-6 space-y-3 overflow-y-auto text-base text-foreground/90 sm:text-lg">
                         {current.bullets.map((b, i) => (
                           <li key={i} className="flex gap-3">
-                            <span className="mt-2 size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+                            <span className="mt-2 size-2 shrink-0 rounded-full bg-brand" />
                             <span>{b}</span>
                           </li>
                         ))}
@@ -347,7 +347,7 @@ export function CreatePptPage() {
                     className={cn(
                       "w-32 shrink-0 rounded-lg border px-2 py-2 text-left transition",
                       i === slideIndex
-                        ? "border-[var(--brand)] bg-[#e6f4ef]"
+                        ? "border-brand bg-brand-soft"
                         : "border-border/70 bg-white/60 hover:border-border",
                     )}
                   >

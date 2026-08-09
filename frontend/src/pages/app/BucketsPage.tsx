@@ -126,16 +126,16 @@ export function BucketsPage() {
             <li key={b.id}>
               <Link
                 to={`/app/buckets/${b.id}`}
-                className="flex h-full flex-col rounded-2xl border border-border/80 bg-white/80 p-5 transition hover:border-[var(--brand)] hover:bg-[#e6f4ef]/50"
+                className="flex h-full flex-col rounded-2xl border border-border/80 bg-white/80 p-5 transition hover:border-brand hover:bg-brand-soft/50"
               >
-                <div className="mb-4 flex h-12 w-10 items-end justify-center rounded-md border-2 border-[var(--brand)]/40 bg-[#e6f4ef]/80">
-                  <div className="mb-1 h-6 w-7 rounded-sm bg-[var(--brand)]/35" />
+                <div className="mb-4 flex h-12 w-10 items-end justify-center rounded-md border-2 border-brand/40 bg-brand-soft/80">
+                  <div className="mb-1 h-6 w-7 rounded-sm bg-brand/35" />
                 </div>
                 <p className="font-medium">{b.name}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {b.grade_level || "No grade"} · #{b.id}
                 </p>
-                <p className="mt-auto pt-4 text-sm font-medium text-[var(--brand)]">Open →</p>
+                <p className="mt-auto pt-4 text-sm font-medium text-brand">Open →</p>
               </Link>
             </li>
           ))}

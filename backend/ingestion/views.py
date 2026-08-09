@@ -3,6 +3,8 @@ DRF views for school-scoped notes: buckets, documents, query/ask, chat.
 """
 from __future__ import annotations
 
+import logging
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
@@ -51,9 +53,9 @@ from .serializers import (
     SubjectBucketSerializer,
 )
 
-User = get_user_model()
 from .services import find_indexed_duplicate, sha256_of_uploaded_file
 from .services.answer_service import answer_question
+from .services.llm_errors import LLMProviderError, http_status_for_llm_error, public_llm_message
 from .services.page_image_service import render_document_page
 from .services.pptx_service import (
     PptxGenerationError,
@@ -62,6 +64,9 @@ from .services.pptx_service import (
 )
 from .services.retrieval_service import search_bucket
 from .tasks import process_document
+
+logger = logging.getLogger(__name__)
+User = get_user_model()
 
 
 def _open_ask_allowed() -> bool:
@@ -351,8 +356,17 @@ class AskView(APIView):
             result = answer_question(
                 bucket.id, question=question, top_k=top_k, history=history
             )
-        except RuntimeError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        except LLMProviderError as exc:
+            return Response(
+                {"detail": exc.public_message},
+                status=http_status_for_llm_error(exc),
+            )
+        except RuntimeError:
+            logger.exception("AskView unexpected failure")
+            return Response(
+                {"detail": public_llm_message(502)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         sources = []
         for i, s in enumerate(result.sources, start=1):
@@ -402,6 +416,32 @@ class AskView(APIView):
             session.save(update_fields=["title", "updated_at"])
             session_payload = {"id": session.id, "title": session.title}
 
+        suggestions: list[str] = []
+        if member:
+            try:
+                from engagement.models import EngagementActivity
+                from engagement.services.activity import record_activity
+                from engagement.services.mastery import recompute_mastery
+                from engagement.services.suggestions import build_chat_suggestions
+
+                record_activity(
+                    member=member,
+                    kind=EngagementActivity.KIND_ASK,
+                    bucket=bucket,
+                    ref_id=str(session_id or ""),
+                )
+                suggestions = build_chat_suggestions(
+                    sources=result.sources,
+                    bucket=bucket,
+                    member=member,
+                )
+                try:
+                    recompute_mastery(member=member, bucket=bucket)
+                except Exception:
+                    pass
+            except Exception:
+                suggestions = []
+
         return Response(
             {
                 "question": question,
@@ -411,6 +451,7 @@ class AskView(APIView):
                 "retrieval_query": result.retrieval_query,
                 "sources": sources,
                 "session": session_payload,
+                "suggestions": suggestions,
             }
         )
 
@@ -438,9 +479,33 @@ class GeneratePptxView(APIView):
                 bucket.id, prompt=prompt, slide_count=slide_count
             )
         except PptxGenerationError as exc:
+            # Domain validation messages are already written for teachers.
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        except RuntimeError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        except LLMProviderError as exc:
+            return Response(
+                {"detail": exc.public_message},
+                status=http_status_for_llm_error(exc),
+            )
+        except RuntimeError:
+            logger.exception("GeneratePptxView unexpected failure")
+            return Response(
+                {"detail": public_llm_message(502)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        member = getattr(request, "member", None) or get_membership(request.user)
+        if member:
+            try:
+                from engagement.models import TeacherImpactEvent
+                from engagement.services.impact import record_impact
+
+                record_impact(
+                    member=member,
+                    kind=TeacherImpactEvent.KIND_PPT,
+                    ref_id=f"ppt:{bucket.id}",
+                )
+            except Exception:
+                pass
 
         return Response(
             {

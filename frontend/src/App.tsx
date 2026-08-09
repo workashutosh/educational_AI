@@ -11,6 +11,7 @@ import { DashboardPage } from "@/pages/app/Dashboard"
 import { LectureRoomPage } from "@/pages/app/LectureRoomPage"
 import { LecturesPage } from "@/pages/app/LecturesPage"
 import { SettingsPage } from "@/pages/app/SettingsPage"
+import { MicroQuizTakePage } from "@/pages/app/MicroQuizTakePage"
 import { MockTestCreatePage } from "@/pages/app/MockTestCreatePage"
 import { MockTestDetailPage } from "@/pages/app/MockTestDetailPage"
 import { MockTestsPage } from "@/pages/app/MockTestsPage"
@@ -86,6 +87,7 @@ export default function App() {
             />
             <Route path="mock-tests/:testId" element={<MockTestDetailPage />} />
             <Route path="mock-tests/:testId/take" element={<MockTestTakePage />} />
+            <Route path="micro-quizzes/:quizId" element={<MicroQuizTakePage />} />
             <Route
               path="mock-tests/:testId/results/:studentId"
               element={

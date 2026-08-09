@@ -76,7 +76,7 @@ export function BucketDetailPage() {
     return (
       <div className="space-y-3">
         <p className="text-destructive">{error || "Not found"}</p>
-        <Link to="/app/buckets" className="text-sm font-medium text-[var(--brand)]">
+        <Link to="/app/buckets" className="text-sm font-medium text-brand">
           ← Back to AI Buckets
         </Link>
       </div>
@@ -89,7 +89,7 @@ export function BucketDetailPage() {
         <div>
           <Link
             to="/app/buckets"
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-[var(--brand)]"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-brand"
           >
             <ArrowLeft className="size-3.5" /> AI Buckets
           </Link>
@@ -97,18 +97,19 @@ export function BucketDetailPage() {
           <p className="text-sm text-muted-foreground">
             {bucket.grade_level || "No grade"} · AI Bucket #{bucket.id}
           </p>
+          <BucketInvestmentStrip bucketId={bucket.id} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link
             to={`/app/chat?bucket=${bucket.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-white px-3 py-1.5 text-sm text-muted-foreground hover:border-[var(--brand)] hover:text-[var(--brand)]"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-white px-3 py-1.5 text-sm text-muted-foreground hover:border-brand hover:text-brand"
           >
             <MessageSquareText className="size-3.5" />
             Chat
           </Link>
           <Link
             to={`/app/ppt?bucket=${bucket.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-white px-3 py-1.5 text-sm text-muted-foreground hover:border-[var(--brand)] hover:text-[var(--brand)]"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/80 bg-white px-3 py-1.5 text-sm text-muted-foreground hover:border-brand hover:text-brand"
           >
             <Presentation className="size-3.5" />
             Create PPT
@@ -128,7 +129,7 @@ export function BucketDetailPage() {
                 className={cn(
                   "rounded-lg px-3 py-1.5 text-sm font-medium transition",
                   tab === key
-                    ? "bg-[var(--brand)] text-white"
+                    ? "bg-brand text-white"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -244,7 +245,7 @@ function DocsPanel({
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <div>
           <p className="flex items-center gap-1.5 font-medium">
-            {icon ? <FileQuestion className="size-4 text-[var(--brand)]" /> : null}
+            {icon ? <FileQuestion className="size-4 text-brand" /> : null}
             {title}
           </p>
           <p className="text-xs text-muted-foreground">{subtitle}</p>
@@ -277,7 +278,7 @@ function DocsPanel({
       !docs.some((d) => d.status === "parsing" || d.status === "indexing") ? (
         <p className="border-b border-border/60 bg-amber-50/80 px-4 py-2 text-xs text-amber-900">
           Waiting for the indexer. Status moves Waiting → Reading → Crunching →{" "}
-          <span className="font-medium text-[var(--brand)]">Ready</span> when a file is
+          <span className="font-medium text-brand">Ready</span> when a file is
           fully processed. Keep Redis + Celery worker running.
         </p>
       ) : null}
@@ -287,7 +288,7 @@ function DocsPanel({
             {docs.map((d) => (
               <li
                 key={d.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-[#f7faf8]/80 px-3 py-2.5"
+                className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-[#f7f9fd]/80 px-3 py-2.5"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{d.original_filename}</p>
@@ -316,7 +317,7 @@ function StatusPill({ status }: { status: string }) {
   const pending = isPendingStatus(status)
   const tone =
     status === "indexed"
-      ? "bg-[#e6f4ef] text-[var(--brand)]"
+      ? "bg-brand-soft text-brand"
       : status === "failed"
         ? "bg-red-50 text-destructive"
         : status === "duplicate"
@@ -459,4 +460,26 @@ function AccessPanel({ bucketId }: { bucketId: number }) {
       </ul>
     </div>
   )
+}
+
+function BucketInvestmentStrip({ bucketId }: { bucketId: number }) {
+  const [summary, setSummary] = useState("")
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await api<{ summary: string }>(
+          `/api/engagement/buckets/${bucketId}/investment/`,
+        )
+        if (!cancelled) setSummary(data.summary || "")
+      } catch {
+        if (!cancelled) setSummary("")
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [bucketId])
+  if (!summary) return null
+  return <p className="mt-2 text-xs text-muted-foreground">{summary}</p>
 }

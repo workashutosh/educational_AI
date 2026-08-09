@@ -92,6 +92,14 @@ def process_document_sync(document_id: int) -> dict:
         document.save(
             update_fields=["pageindex_tree", "status", "processed_at", "error_message"]
         )
+        manifest = result.get("manifest") or {}
+        logger.info(
+            "Indexed doc_id=%s filename=%s chunks=%s page_range=%s",
+            document.pk,
+            document.original_filename,
+            manifest.get("chunk_count"),
+            manifest.get("chunk_page_range"),
+        )
     except Exception as exc:
         logger.exception("Indexing failed for document %s", document_id)
         document.status = Document.STATUS_FAILED
@@ -101,6 +109,12 @@ def process_document_sync(document_id: int) -> dict:
         return {"ok": False, "error": document.error_message}
 
     _cleanup(work_dir)
+    try:
+        from engagement.tasks import on_document_indexed
+
+        on_document_indexed.delay(document.pk)
+    except Exception:
+        logger.exception("Failed to enqueue engagement.on_document_indexed")
     return {"ok": True, "status": Document.STATUS_INDEXED, "document_id": document.pk}
 
 

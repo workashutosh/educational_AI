@@ -166,7 +166,7 @@ export function MockTestStudentResultPage() {
     return (
       <div>
         <p className="text-destructive">{error || "Not found"}</p>
-        <Link to={`/app/mock-tests/${tid}`} className="text-sm text-[var(--brand)]">
+        <Link to={`/app/mock-tests/${tid}`} className="text-sm text-brand">
           ← Back
         </Link>
       </div>
@@ -178,7 +178,7 @@ export function MockTestStudentResultPage() {
       <div>
         <Link
           to={`/app/mock-tests/${tid}`}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-[var(--brand)]"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-brand"
         >
           <ArrowLeft className="size-3.5" /> Back to results
         </Link>
@@ -187,7 +187,7 @@ export function MockTestStudentResultPage() {
         </h1>
         <p className="text-sm text-muted-foreground">@{data.username}</p>
         {data.score != null ? (
-          <p className="mt-2 text-lg font-semibold text-[var(--brand)]">
+          <p className="mt-2 text-lg font-semibold text-brand">
             Official score: {data.score}/{data.max_score} ({data.percent}%)
             {data.brief_pending_count
               ? ` · ${data.brief_pending_count} brief pending`
@@ -211,7 +211,7 @@ export function MockTestStudentResultPage() {
       {data.submitted_at &&
       !data.results_released &&
       data.results_mode !== "immediate" ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--brand)]/30 bg-[#e6f4ef]/50 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand/30 bg-brand-soft/50 px-4 py-3">
           <p className="text-sm">
             Review the submission below, then show the student their score and answer key.
           </p>
@@ -231,7 +231,7 @@ export function MockTestStudentResultPage() {
         </div>
       ) : null}
 
-      {mailNote ? <p className="text-sm text-[var(--brand)]">{mailNote}</p> : null}
+      {mailNote ? <p className="text-sm text-brand">{mailNote}</p> : null}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
       {data.review?.length ? (
@@ -318,7 +318,7 @@ export function MockTestStudentResultPage() {
                     </div>
                   </div>
                   {r.confirmed ? (
-                    <p className="mt-2 text-xs text-[var(--brand)]">
+                    <p className="mt-2 text-xs text-brand">
                       Confirmed at {r.teacher_score} / {r.marks}
                     </p>
                   ) : null}

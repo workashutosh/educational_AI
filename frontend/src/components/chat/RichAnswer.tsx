@@ -45,7 +45,7 @@ function formatAnswerHtml(text: string) {
     .replace(/^## (.+)$/gm, "<h3 class='mt-2 font-semibold'>$1</h3>")
     .replace(/^# (.+)$/gm, "<h3 class='mt-2 font-semibold'>$1</h3>")
     .replace(/^[-*] (.+)$/gm, "<li class='ml-4 list-disc'>$1</li>")
-    .replace(/\[(\d+)\]/g, '<span class="font-semibold text-[var(--brand)]">[$1]</span>')
+    .replace(/\[(\d+)\]/g, '<span class="font-semibold text-brand">[$1]</span>')
     .replace(/\n{2,}/g, "<br/><br/>")
     .replace(/\n/g, "<br/>")
   html = html.replace(/\u0000MATH(\d+)\u0000/g, (_, i) => chunks[Number(i)])
@@ -110,7 +110,7 @@ function AuthPageImage({
   }, [url])
 
   return (
-    <figure className="overflow-hidden rounded-xl border border-border/70 bg-[#f7faf8]">
+    <figure className="overflow-hidden rounded-xl border border-border/70 bg-[#f7f9fd]">
       <img
         ref={imgRef}
         alt={label}
@@ -180,7 +180,7 @@ export function RichAnswer({
           {sources.slice(0, 6).map((s, j) => (
             <span
               key={j}
-              className="rounded-md bg-[#f7faf8] px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              className="rounded-md bg-[#f7f9fd] px-1.5 py-0.5 text-[11px] text-muted-foreground"
             >
               [{s.index ?? j + 1}] {s.document_filename || `doc ${s.document_id}`}
               {s.page_ref ? ` · ${s.page_ref}` : ""}

@@ -680,7 +680,7 @@ def email_attempt_result(attempt: MockAttempt) -> str:
         f"Score: {score_line}\n\n"
         f"Breakdown:\n{summary_block}\n\n"
         f"Open your full review here:\n{link}\n\n"
-        "— Education AI\n"
+        "— ClassKit\n"
     )
     rows_html = "".join(
         f"<tr><td style='padding:6px 8px;border-bottom:1px solid #e5e7eb;'>"
@@ -700,7 +700,7 @@ def email_attempt_result(attempt: MockAttempt) -> str:
         f"<p style='margin-top:20px;'><a href=\"{link}\" "
         "style='display:inline-block;background:#0f766e;color:#fff;padding:10px 16px;"
         "border-radius:8px;text-decoration:none;'>View full results</a></p>"
-        "<p style='color:#6b7280;font-size:12px;margin-top:24px;'>— Education AI</p>"
+        "<p style='color:#6b7280;font-size:12px;margin-top:24px;'>— ClassKit</p>"
         "</body></html>"
     )
     try:

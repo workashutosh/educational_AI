@@ -139,7 +139,7 @@ export function MockTestDetailPage() {
     return (
       <div>
         <p className="text-destructive">{error || "Not found"}</p>
-        <Link to="/app/mock-tests" className="text-sm text-[var(--brand)]">
+        <Link to="/app/mock-tests" className="text-sm text-brand">
           ← Back
         </Link>
       </div>
@@ -215,7 +215,7 @@ export function MockTestDetailPage() {
         <div>
           <Link
             to="/app/mock-tests"
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-[var(--brand)]"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-brand"
           >
             <ArrowLeft className="size-3.5" /> Mock Tests
           </Link>
@@ -275,7 +275,7 @@ export function MockTestDetailPage() {
             className={cn(
               "rounded-lg px-3 py-1.5 text-sm font-medium transition",
               tab === key
-                ? "bg-[var(--brand)] text-white"
+                ? "bg-brand text-white"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
@@ -309,7 +309,7 @@ export function MockTestDetailPage() {
                     {q.options.map((opt, i) => (
                       <li
                         key={i}
-                        className={cn(correct.has(i) && "font-medium text-[var(--brand)]")}
+                        className={cn(correct.has(i) && "font-medium text-brand")}
                       >
                         {String.fromCharCode(65 + i)}. {opt}
                       </li>
@@ -436,7 +436,64 @@ function ResultsPanel({
   const s = results.summary
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState("")
+  const [lbEnabled, setLbEnabled] = useState(false)
+  const [lbRows, setLbRows] = useState<
+    { display_name: string; percent: number; score: number; max_score: number }[]
+  >([])
 
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await api<{
+          enabled: boolean
+          entries: {
+            display_name: string
+            percent: number
+            score: number
+            max_score: number
+          }[]
+        }>(`/api/engagement/mock-tests/${testId}/leaderboard/`)
+        if (!cancelled) {
+          setLbEnabled(!!data.enabled)
+          setLbRows(data.entries || [])
+        }
+      } catch {
+        /* ignore */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [testId, results])
+
+  async function toggleLeaderboard(enabled: boolean) {
+    setBusy(true)
+    setErr("")
+    try {
+      const data = await api<{ enabled: boolean }>(
+        `/api/engagement/mock-tests/${testId}/leaderboard/settings/`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ enabled }),
+        },
+      )
+      setLbEnabled(!!data.enabled)
+      const board = await api<{
+        entries: {
+          display_name: string
+          percent: number
+          score: number
+          max_score: number
+        }[]
+      }>(`/api/engagement/mock-tests/${testId}/leaderboard/`)
+      setLbRows(board.entries || [])
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not update leaderboard")
+    } finally {
+      setBusy(false)
+    }
+  }
   async function setMode(mode: "immediate" | "after_review") {
     setBusy(true)
     setErr("")
@@ -525,6 +582,42 @@ function ResultsPanel({
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-border/80 bg-white/80 p-4">
         <div>
+          <p className="text-sm font-medium">Class leaderboard</p>
+          <p className="text-xs text-muted-foreground">
+            Opt-in. Students see anonymous ranks; names stay private to the class
+            roster here.
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant={lbEnabled ? "default" : "outline"}
+          disabled={busy}
+          onClick={() => void toggleLeaderboard(!lbEnabled)}
+        >
+          {lbEnabled ? "Leaderboard on" : "Show class leaderboard"}
+        </Button>
+      </div>
+      {lbEnabled && lbRows.length ? (
+        <ol className="rounded-2xl border border-border/80 bg-white/80 p-4 text-sm">
+          {lbRows.slice(0, 15).map((r, i) => (
+            <li
+              key={`${r.display_name}-${i}`}
+              className="flex items-center justify-between border-b border-border/50 py-2 last:border-0"
+            >
+              <span>
+                #{i + 1} {r.display_name}
+              </span>
+              <span className="tabular-nums text-muted-foreground">
+                {r.percent}% ({r.score}/{r.max_score})
+              </span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-border/80 bg-white/80 p-4">
+        <div>
           <p className="text-sm font-medium">Results for students</p>
           <p className="text-xs text-muted-foreground">
             {resultsMode === "immediate"
@@ -571,7 +664,7 @@ function ResultsPanel({
         </div>
       </div>
       {err ? <p className="text-sm text-destructive">{err}</p> : null}
-      {mailNote ? <p className="text-sm text-[var(--brand)]">{mailNote}</p> : null}
+      {mailNote ? <p className="text-sm text-brand">{mailNote}</p> : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Assigned" value={String(s.assigned)} />
@@ -633,7 +726,7 @@ function ResultsPanel({
                       r.status === "final" ? (
                         <Link
                           to={`/app/mock-tests/${testId}/results/${r.student_id}`}
-                          className="text-sm font-medium text-[var(--brand)]"
+                          className="text-sm font-medium text-brand"
                         >
                           {r.status === "grading" || (r.brief_pending_count ?? 0) > 0
                             ? "Review"
@@ -677,7 +770,7 @@ function ResultsPanel({
               </div>
               <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-[var(--brand)]"
+                  className="h-full rounded-full bg-brand"
                   style={{ width: `${Math.round(q.correct_rate * 100)}%` }}
                 />
               </div>

@@ -43,6 +43,7 @@ type Msg = {
   role: "user" | "assistant"
   content: string
   sources?: AskSource[]
+  suggestions?: string[]
 }
 
 export function LectureRoomPage() {
@@ -55,7 +56,9 @@ export function LectureRoomPage() {
   const [busy, setBusy] = useState(false)
   const [history, setHistory] = useState<Msg[]>([])
   const [input, setInput] = useState("")
+  const [joinUrlDraft, setJoinUrlDraft] = useState("")
   const bottomRef = useRef<HTMLDivElement>(null)
+  const lectureChatRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -76,7 +79,8 @@ export function LectureRoomPage() {
   }, [load])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = lectureChatRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [history, busy])
 
   async function goLive() {
@@ -115,7 +119,31 @@ export function LectureRoomPage() {
       })
       setRoom({ ...room, ...updated, notes: room.notes, ai: room.ai })
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Teams create failed")
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Couldn’t create a Teams link. Connect Microsoft first, then try again.",
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveJoinUrl(e?: FormEvent) {
+    e?.preventDefault()
+    const url = joinUrlDraft.trim()
+    if (!room || !url) return
+    setBusy(true)
+    setError("")
+    try {
+      const updated = await api<Room>(`/api/lectures/${id}/`, {
+        method: "PATCH",
+        body: JSON.stringify({ teams_join_url: url }),
+      })
+      setRoom({ ...room, ...updated, notes: room.notes, ai: room.ai })
+      setJoinUrlDraft("")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save join URL")
     } finally {
       setBusy(false)
     }
@@ -130,7 +158,11 @@ export function LectureRoomPage() {
     const next = [...history, { role: "user" as const, content: q }]
     setHistory(next)
     try {
-      const res = await api<{ answer: string; sources: AskSource[] }>("/api/ask/", {
+      const res = await api<{
+        answer: string
+        sources: AskSource[]
+        suggestions?: string[]
+      }>("/api/ask/", {
         method: "POST",
         body: JSON.stringify({
           query: q,
@@ -143,7 +175,12 @@ export function LectureRoomPage() {
       })
       setHistory([
         ...next,
-        { role: "assistant", content: res.answer, sources: res.sources || [] },
+        {
+          role: "assistant",
+          content: res.answer,
+          sources: res.sources || [],
+          suggestions: res.suggestions || [],
+        },
       ])
     } catch (err) {
       setError(err instanceof Error ? err.message : "AI ask failed")
@@ -162,7 +199,7 @@ export function LectureRoomPage() {
     return (
       <div className="space-y-3">
         <p className="text-destructive">{error || "Not found"}</p>
-        <Link to="/app/lectures" className="text-sm text-[var(--brand)]">
+        <Link to="/app/lectures" className="text-sm text-brand">
           ← Lectures
         </Link>
       </div>
@@ -184,9 +221,6 @@ export function LectureRoomPage() {
           <p className="text-sm text-muted-foreground">
             {room.bucket_name} ·{" "}
             <span className="capitalize">{room.status}</span>
-            {session?.membership?.role !== "student" && room.teams_error
-              ? ` · ${room.teams_error}`
-              : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -195,16 +229,12 @@ export function LectureRoomPage() {
               href={room.teams_join_url}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--brand)] px-3 py-2 text-sm font-medium text-white"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white"
             >
               <Video className="size-4" />
               Join Teams
               <ExternalLink className="size-3.5 opacity-80" />
             </a>
-          ) : room.can_manage ? (
-            <Button type="button" variant="outline" disabled={busy} onClick={() => void retryTeams()}>
-              Create Teams meeting
-            </Button>
           ) : null}
           {room.can_manage && room.status !== "live" && room.status !== "ended" ? (
             <Button type="button" disabled={busy} onClick={() => void goLive()}>
@@ -221,6 +251,54 @@ export function LectureRoomPage() {
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
+      {room.can_manage && !room.teams_join_url ? (
+        <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-amber-950">Create Teams meeting</p>
+              <p className="text-xs text-amber-900/80">
+                Uses your connected Microsoft account (Lectures → Connect Microsoft).
+                Sign in with a work/school account that has Teams.
+              </p>
+            </div>
+            <Button type="button" disabled={busy} onClick={() => void retryTeams()}>
+              {busy ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" data-icon="inline-start" />
+                  Creating…
+                </>
+              ) : (
+                "Create meeting link"
+              )}
+            </Button>
+            <Link
+              to="/app/lectures"
+              className="text-xs text-amber-950 underline underline-offset-2"
+            >
+              Connect Microsoft
+            </Link>
+          </div>
+          <form
+            onSubmit={(e) => void saveJoinUrl(e)}
+            className="flex flex-wrap items-end gap-2 border-t border-amber-200/80 pt-3"
+          >
+            <div className="min-w-[16rem] flex-1 space-y-1">
+              <p className="text-xs font-medium text-amber-950">Or paste a join URL</p>
+              <Input
+                type="url"
+                value={joinUrlDraft}
+                onChange={(e) => setJoinUrlDraft(e.target.value)}
+                placeholder="https://teams.microsoft.com/l/meetup-join/..."
+                disabled={busy}
+              />
+            </div>
+            <Button type="submit" variant="outline" disabled={busy || !joinUrlDraft.trim()}>
+              Save link
+            </Button>
+          </form>
+        </div>
+      ) : null}
+
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,28rem)]">
         <section className="flex min-h-[22rem] flex-col rounded-2xl border border-border/80 bg-white/80">
           <div className="border-b border-border/70 px-4 py-3">
@@ -235,7 +313,7 @@ export function LectureRoomPage() {
                 {room.notes.map((n) => (
                   <li
                     key={n.id}
-                    className="rounded-xl border border-border/70 bg-[#f7faf8]/80 px-3 py-2.5"
+                    className="rounded-xl border border-border/70 bg-[#f7f9fd]/80 px-3 py-2.5"
                   >
                     <p className="truncate text-sm font-medium">{n.original_filename}</p>
                     <p className="text-xs text-muted-foreground">
@@ -263,7 +341,7 @@ export function LectureRoomPage() {
             <p className="font-medium">AI lecture assist</p>
             <p className="text-xs text-muted-foreground">{room.ai.hint}</p>
           </div>
-          <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+          <div ref={lectureChatRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3">
             {!history.length ? (
               <p className="px-1 py-6 text-center text-sm text-muted-foreground">
                 Ask for explanations, examples, or quick checks from the notes while you teach.
@@ -283,7 +361,23 @@ export function LectureRoomPage() {
                   )}
                 >
                   {m.role === "assistant" ? (
-                    <RichAnswer content={m.content} sources={m.sources} />
+                    <>
+                      <RichAnswer content={m.content} sources={m.sources} />
+                      {m.suggestions?.length && i === history.length - 1 ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/50 pt-2">
+                          {m.suggestions.map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              className="rounded-lg border border-border px-2 py-1 text-xs hover:border-brand"
+                              onClick={() => setInput(s)}
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
                   ) : (
                     m.content
                   )}

@@ -208,7 +208,7 @@ export function MockTestTakePage() {
         </Link>
         <div className="rounded-2xl border border-border/80 bg-white/80 p-8">
           <h1 className="font-display text-3xl tracking-tight">{test.title}</h1>
-          <p className="mt-3 text-lg font-medium text-[var(--brand)]">Submitted</p>
+          <p className="mt-3 text-lg font-medium text-brand">Submitted</p>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground">
             Your answers are with your teacher for review. Score and answer review will
             appear here once they release your results.
@@ -216,7 +216,7 @@ export function MockTestTakePage() {
           <Link
             to="/app/mock-tests"
             className={cn(
-              "mt-6 inline-flex rounded-lg bg-[var(--brand)] px-3 py-2 text-sm font-medium text-white",
+              "mt-6 inline-flex rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white",
             )}
           >
             Back to My Tests
@@ -238,7 +238,7 @@ export function MockTestTakePage() {
         </Link>
         <div>
           <h1 className="font-display text-3xl tracking-tight">{test.title}</h1>
-          <p className="mt-2 text-2xl font-medium text-[var(--brand)]">
+          <p className="mt-2 text-2xl font-medium text-brand">
             {score.score}/{score.max_score} ({score.percent}%)
           </p>
           {score.brief_pending_count ? (
@@ -250,6 +250,7 @@ export function MockTestTakePage() {
             <p className="mt-1 text-sm text-muted-foreground">Final score confirmed.</p>
           )}
         </div>
+        <StudentLeaderboardPanel testId={id} />
         <ul className="grid gap-3 lg:grid-cols-2">
           {review.map((r) => (
             <li key={r.question_id} className="rounded-2xl border border-border/80 bg-white/80 p-4">
@@ -257,7 +258,7 @@ export function MockTestTakePage() {
                 {r.qtype === "brief" ? (
                   <span className="mt-0.5 text-xs text-muted-foreground">Brief</span>
                 ) : r.is_correct ? (
-                  <CheckCircle2 className="mt-0.5 size-4 text-[var(--brand)]" />
+                  <CheckCircle2 className="mt-0.5 size-4 text-brand" />
                 ) : (
                   <XCircle className="mt-0.5 size-4 text-destructive" />
                 )}
@@ -270,7 +271,7 @@ export function MockTestTakePage() {
                         r.qtype === "brief" && !r.confirmed
                           ? "text-amber-700"
                           : (r.earned_marks ?? 0) > 0
-                            ? "text-[var(--brand)]"
+                            ? "text-brand"
                             : "text-destructive",
                       )}
                     >
@@ -309,7 +310,7 @@ export function MockTestTakePage() {
                         key={i}
                         className={cn(
                           "rounded-lg px-2 py-1",
-                          correct && "bg-[#e6f4ef] text-[var(--brand)]",
+                          correct && "bg-brand-soft text-brand",
                           selected && !correct && "bg-red-50 text-destructive",
                         )}
                       >
@@ -465,6 +466,62 @@ export function MockTestTakePage() {
           "Submit test"
         )}
       </Button>
+    </div>
+  )
+}
+
+function StudentLeaderboardPanel({ testId }: { testId: number }) {
+  const [data, setData] = useState<{
+    enabled: boolean
+    my_rank: number | null
+    entries: { display_name: string; percent: number; is_you?: boolean }[]
+    message?: string
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await api<{
+          enabled: boolean
+          my_rank: number | null
+          entries: { display_name: string; percent: number; is_you?: boolean }[]
+          message?: string
+        }>(`/api/engagement/mock-tests/${testId}/leaderboard/`)
+        if (!cancelled) setData(res)
+      } catch {
+        if (!cancelled) setData(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [testId])
+
+  if (!data?.enabled) return null
+
+  return (
+    <div className="rounded-2xl border border-border/80 bg-white/80 p-4">
+      <p className="text-sm font-medium">Class leaderboard</p>
+      {data.my_rank ? (
+        <p className="mt-1 text-xs text-muted-foreground">Your rank: #{data.my_rank}</p>
+      ) : null}
+      <ol className="mt-3 space-y-1.5 text-sm">
+        {data.entries.slice(0, 10).map((e, i) => (
+          <li
+            key={`${e.display_name}-${i}`}
+            className={cn(
+              "flex justify-between",
+              e.is_you && "font-medium text-brand",
+            )}
+          >
+            <span>
+              #{i + 1} {e.display_name || (e.is_you ? "You" : "")}
+            </span>
+            <span className="tabular-nums text-muted-foreground">{e.percent}%</span>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }

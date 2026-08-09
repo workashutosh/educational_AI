@@ -19,6 +19,7 @@ from rest_framework.views import APIView
 from .models import (
     DEFAULT_BUCKET_QUOTA_BYTES,
     DEFAULT_MAX_BUCKETS,
+    FREE_TRIAL_MAX_USERS,
     GB,
     PendingOnboard,
     School,
@@ -467,7 +468,8 @@ class OnboardCompleteView(APIView):
 
         max_buckets = DEFAULT_MAX_BUCKETS
         bucket_quota_bytes = DEFAULT_BUCKET_QUOTA_BYTES
-        max_users = 0
+        # Free trial always caps seats (skip used to leave unlimited / 0).
+        max_users = FREE_TRIAL_MAX_USERS
         max_managers = 0
 
         if not skip:
@@ -501,6 +503,11 @@ class OnboardCompleteView(APIView):
                 {"detail": "Seat counts cannot be negative."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # Free trial: hard cap user seats
+        if max_users == 0 or max_users > FREE_TRIAL_MAX_USERS:
+            max_users = FREE_TRIAL_MAX_USERS
+        if max_managers > FREE_TRIAL_MAX_USERS:
+            max_managers = FREE_TRIAL_MAX_USERS
 
         # Re-check uniqueness at completion time
         if User.objects.filter(username__iexact=pending.email).exists():

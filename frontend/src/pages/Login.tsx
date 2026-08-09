@@ -45,9 +45,9 @@ export function LoginPage() {
       subtitle="Teachers, managers, students, and school admins use the same login."
       footer={
         <>
-          New school? <Link className="font-medium text-[var(--brand)]" to="/onboard">Register &amp; onboard</Link>
+          New school? <Link className="font-medium text-brand" to="/onboard">Register &amp; onboard</Link>
           {" · "}
-          Have a join code? <Link className="font-medium text-[var(--brand)]" to="/join">Join school</Link>
+          Have a join code? <Link className="font-medium text-brand" to="/join">Join school</Link>
         </>
       }
     >

@@ -1,4 +1,4 @@
-# Education AI
+# ClassKit
 
 Monorepo for school-scoped teacher notes → parse → chunk → embed → RAG Q&A.
 

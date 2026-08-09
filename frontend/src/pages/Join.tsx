@@ -55,14 +55,13 @@ export function JoinPage() {
 
   return (
     <AuthShell
-      brand="Join"
       title="Join your school"
       subtitle="Ask your admin for the join code. Teachers upload after bucket access is granted."
       footer={
         <>
-          Need to create a school? <Link className="font-medium text-[var(--brand)]" to="/onboard">School onboarding</Link>
+          Need to create a school? <Link className="font-medium text-brand" to="/onboard">School onboarding</Link>
           {" · "}
-          <Link className="font-medium text-[var(--brand)]" to="/login">Sign in</Link>
+          <Link className="font-medium text-brand" to="/login">Sign in</Link>
         </>
       }
     >

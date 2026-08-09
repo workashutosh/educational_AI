@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Education AI{% endblock %}</title>
+  <title>{% block title %}ClassKit{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
       --ink: #1a2332;
@@ -11,18 +14,18 @@
       --line: #d5dee8;
       --paper: #f3f6f8;
       --card: #fff;
-      --accent: #0b6e4f;
+      --accent: #0058db;
       --accent-soft: #e6f4ef;
       --err: #9b1c1c;
       --err-bg: #fdecec;
-      --ok: #0b6e4f;
+      --ok: #0058db;
       --ok-bg: #e6f4ef;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       color: var(--ink);
       background:
         radial-gradient(ellipse 70% 45% at 0% 0%, #e8f2ec 0%, transparent 55%),
@@ -36,7 +39,7 @@
     }
     .shell.wide { max-width: 820px; }
     .brand {
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       font-size: 0.72rem;
       letter-spacing: 0.14em;
       text-transform: uppercase;
@@ -57,7 +60,7 @@
     }
     label {
       display: block;
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       font-size: 0.78rem;
       font-weight: 600;
       letter-spacing: 0.04em;
@@ -85,7 +88,7 @@
       margin: 0.35rem 0 0;
       padding: 0;
       color: var(--err);
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       font-size: 0.85rem;
     }
     .btn {
@@ -95,7 +98,7 @@
       border: none;
       border-radius: 10px;
       padding: 0.8rem 1rem;
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       font-weight: 600;
       font-size: 0.95rem;
       background: var(--accent);
@@ -114,7 +117,7 @@
     .links {
       margin-top: 1.25rem;
       text-align: center;
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       font-size: 0.9rem;
       color: var(--muted);
     }
@@ -123,7 +126,7 @@
       border-radius: 10px;
       padding: 0.75rem 0.9rem;
       margin-bottom: 1rem;
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       font-size: 0.9rem;
     }
     .flash.error { background: var(--err-bg); color: var(--err); }
@@ -137,7 +140,7 @@
       margin-bottom: 1.5rem;
     }
     .meta {
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
       font-size: 0.85rem;
       color: var(--muted);
     }

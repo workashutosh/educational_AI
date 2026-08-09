@@ -297,6 +297,17 @@ class MockTestListCreateView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         test = MockTest.objects.select_related("bucket").get(pk=test.pk)
+        try:
+            from engagement.models import TeacherImpactEvent
+            from engagement.services.impact import record_impact
+
+            record_impact(
+                member=member,
+                kind=TeacherImpactEvent.KIND_MOCK_GENERATE,
+                ref_id=f"mock:{test.id}",
+            )
+        except Exception:
+            pass
         return Response(
             _test_detail(test, member),
             status=status.HTTP_201_CREATED,
@@ -447,6 +458,19 @@ class MockTestAssignView(APIView):
             )
             if was_created:
                 created += 1
+                try:
+                    from engagement.services.notifications import create_notification
+
+                    create_notification(
+                        recipient=s,
+                        kind="test_assigned",
+                        title=f"New test: {test.title}",
+                        body="A mock test was assigned to you.",
+                        link_path=f"/app/mock-tests/{test.id}",
+                        dedupe_key=f"assign:{test.id}:{s.id}",
+                    )
+                except Exception:
+                    pass
 
         published = False
         if should_publish and test.status == MockTest.STATUS_DRAFT:
@@ -605,6 +629,39 @@ class MockTestSubmitView(APIView):
             attempt.ends_at is not None and now > attempt.ends_at
         ))
         attempt.refresh_from_db()
+        try:
+            from engagement.models import EngagementActivity
+            from engagement.services.activity import record_activity
+            from engagement.services.mastery import recompute_mastery
+
+            record_activity(
+                member=member,
+                kind=EngagementActivity.KIND_MOCK_SUBMIT,
+                bucket=test.bucket,
+                ref_id=f"mock:{test.id}",
+            )
+            recompute_mastery(member=member, bucket=test.bucket)
+            # Nudge teacher if many still pending
+            if test.created_by_id:
+                from engagement.services.notifications import create_notification
+                from mock_tests.models import MockAssignment
+
+                assigned_n = MockAssignment.objects.filter(test=test).count()
+                submitted_n = MockAttempt.objects.filter(
+                    test=test, submitted_at__isnull=False
+                ).count()
+                pending = assigned_n - submitted_n
+                if pending > 0 and test.created_by_id:
+                    create_notification(
+                        recipient=test.created_by,
+                        kind="students_pending",
+                        title=f"{pending} students still to attempt “{test.title}”",
+                        body="Follow up so the class stays on track.",
+                        link_path=f"/app/mock-tests/{test.id}",
+                        dedupe_key=f"pending_submit:{test.id}",
+                    )
+        except Exception:
+            pass
         payload = _student_attempt_payload(attempt)
         return Response(
             {

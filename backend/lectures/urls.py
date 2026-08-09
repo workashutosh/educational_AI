@@ -4,6 +4,17 @@ from . import views
 
 urlpatterns = [
     path("teams/status/", views.TeamsStatusView.as_view(), name="lectures-teams-status"),
+    path("teams/connect/", views.TeamsConnectView.as_view(), name="lectures-teams-connect"),
+    path(
+        "teams/callback/",
+        views.TeamsOAuthCallbackView.as_view(),
+        name="lectures-teams-callback",
+    ),
+    path(
+        "teams/disconnect/",
+        views.TeamsDisconnectView.as_view(),
+        name="lectures-teams-disconnect",
+    ),
     path("", views.LectureListCreateView.as_view(), name="lecture-list-create"),
     path("<int:pk>/", views.LectureDetailView.as_view(), name="lecture-detail"),
     path("<int:pk>/room/", views.LectureRoomView.as_view(), name="lecture-room"),

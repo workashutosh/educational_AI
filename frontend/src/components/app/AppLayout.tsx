@@ -11,12 +11,13 @@ import {
   PanelLeftOpen,
   Presentation,
   Settings2,
-  Sparkles,
   Video,
   type LucideIcon,
 } from "lucide-react"
 
+import { BrandLogo } from "@/components/BrandLogo"
 import { Button } from "@/components/ui/button"
+import { NotificationBell } from "@/components/app/NotificationBell"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 
@@ -107,40 +108,40 @@ export function AppLayout() {
   }, [collapsed])
 
   return (
-    <div className="flex h-svh overflow-hidden bg-[#f3f6f8]">
+    <div className="fixed inset-0 flex overflow-hidden bg-background">
       <aside
         className={cn(
           "hidden shrink-0 flex-col border-r border-border/80 bg-white/90 py-4 transition-[width] duration-200 ease-out md:flex",
           collapsed ? "w-[4.25rem] px-2" : "w-56 px-3",
         )}
       >
-        <div className={cn("mb-4 flex items-start gap-2", collapsed ? "flex-col items-center" : "px-1")}>
+        <div className={cn("mb-4 flex items-start gap-1", collapsed ? "flex-col items-center" : "px-1")}>
           <div className={cn("min-w-0", collapsed ? "text-center" : "flex-1")}>
-            <p
-              className={cn(
-                "flex items-center gap-2 font-display tracking-tight text-[var(--brand)]",
-                collapsed ? "justify-center text-base" : "text-lg",
-              )}
-              title="Education AI"
-            >
-              <Sparkles className="size-4 shrink-0" />
-              {!collapsed ? <span>Education AI</span> : null}
-            </p>
+            <BrandLogo
+              to={false}
+              withWordmark={!collapsed}
+              size={collapsed ? 28 : 30}
+              className={cn(collapsed ? "justify-center" : "", "text-brand")}
+              wordmarkClassName={collapsed ? "text-base" : "text-lg"}
+            />
             {!collapsed ? (
               <p className="mt-1 truncate text-xs text-muted-foreground">{school?.name}</p>
             ) : null}
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0 text-muted-foreground"
-            onClick={() => setCollapsed((c) => !c)}
-            title={collapsed ? "Expand sidebar" : "Minimize sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Minimize sidebar"}
-          >
-            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-          </Button>
+          <div className={cn("flex shrink-0 items-center", collapsed ? "flex-col gap-1" : "gap-0.5")}>
+            <NotificationBell />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 text-muted-foreground"
+              onClick={() => setCollapsed((c) => !c)}
+              title={collapsed ? "Expand sidebar" : "Minimize sidebar"}
+              aria-label={collapsed ? "Expand sidebar" : "Minimize sidebar"}
+            >
+              {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+            </Button>
+          </div>
         </div>
 
         <nav className="flex flex-1 flex-col gap-0.5">
@@ -155,7 +156,7 @@ export function AppLayout() {
                   "flex items-center rounded-lg py-2 text-sm font-medium transition",
                   collapsed ? "justify-center px-2" : "gap-2.5 px-3",
                   isActive
-                    ? "bg-[#e6f4ef] text-[var(--brand)]"
+                    ? "bg-brand-soft text-brand"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )
               }
@@ -189,32 +190,38 @@ export function AppLayout() {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-3 border-b border-border/80 bg-white/70 px-3 py-2.5 md:hidden">
-          <p className="font-display text-base text-[var(--brand)]">Education AI</p>
-          <div className="flex gap-0.5 overflow-x-auto">
-            {items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  cn(
-                    "rounded-lg p-2",
-                    isActive ? "bg-[#e6f4ef] text-[var(--brand)]" : "text-muted-foreground",
-                  )
-                }
-                title={item.label}
-              >
-                <item.icon className="size-4" />
-              </NavLink>
-            ))}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/80 bg-white/70 px-3 py-2.5 md:hidden">
+          <BrandLogo to={false} size={26} wordmarkClassName="text-base text-brand" />
+          <div className="flex items-center gap-1">
+            <NotificationBell />
+            <div className="flex gap-0.5 overflow-x-auto">
+              {items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    cn(
+                      "rounded-lg p-2",
+                      isActive ? "bg-brand-soft text-brand" : "text-muted-foreground",
+                    )
+                  }
+                  title={item.label}
+                >
+                  <item.icon className="size-4" />
+                </NavLink>
+              ))}
+            </div>
           </div>
         </header>
         <main
           className={cn(
-            "min-h-0 flex-1",
-            workspace ? "overflow-hidden" : "overflow-y-auto px-4 py-5 sm:px-5",
+            // h-0 + flex-1 gives the pane a definite height (critical for chat fill)
+            "relative h-0 min-h-0 flex-1",
+            workspace
+              ? "overflow-hidden"
+              : "overflow-y-auto px-4 py-5 sm:px-5",
           )}
         >
           <Outlet />
