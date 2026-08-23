@@ -475,10 +475,11 @@ class GeneratePptxView(APIView):
         )
         prompt = serializer.validated_data["prompt"]
         slide_count = serializer.validated_data.get("slide_count", 8)
+        style = serializer.validated_data.get("style", "creative")
 
         try:
             result = generate_pptx_outline(
-                bucket.id, prompt=prompt, slide_count=slide_count
+                bucket.id, prompt=prompt, slide_count=slide_count, style=style
             )
         except PptxGenerationError as exc:
             # Domain validation messages are already written for teachers.
@@ -515,6 +516,7 @@ class GeneratePptxView(APIView):
                 "prompt": result.prompt,
                 "title": result.title,
                 "model": result.model,
+                "style": result.style,
                 "slide_count": len(result.slides),
                 "slides": result.slides,
             }
@@ -540,6 +542,7 @@ class DownloadPptxView(APIView):
             result = pptx_from_outline(
                 serializer.validated_data["title"],
                 serializer.validated_data["slides"],
+                style=serializer.validated_data.get("style", "creative"),
             )
         except PptxGenerationError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)

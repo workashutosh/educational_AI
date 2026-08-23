@@ -15,9 +15,16 @@ import { api, apiDownload, triggerBlobDownload } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
+type PptLayout = "standard" | "hook" | "compare" | "quiz" | "quote" | "summary"
+
+type PptStyle = "creative" | "clean" | "bold" | "sunset" | "ocean"
+
 type PptSlide = {
   heading: string
+  subtitle?: string
+  layout?: PptLayout
   bullets: string[]
+  callout?: string
   notes?: string
 }
 
@@ -26,6 +33,65 @@ type PptOutline = {
   slides: PptSlide[]
   slide_count: number
   prompt: string
+  style?: PptStyle
+}
+
+const STYLES: { id: PptStyle; label: string; hint: string; preview: string }[] = [
+  {
+    id: "creative",
+    label: "Creative",
+    hint: "Varied layouts, hooks & analogies",
+    preview: "from-[#faf5ff] to-[#fff1f2]",
+  },
+  {
+    id: "clean",
+    label: "Clean",
+    hint: "Simple classroom deck",
+    preview: "from-[#f7f9fd] to-[#eef5f1]",
+  },
+  {
+    id: "bold",
+    label: "Bold",
+    hint: "High-contrast dark slides",
+    preview: "from-[#111827] to-[#1f2937]",
+  },
+  {
+    id: "sunset",
+    label: "Sunset",
+    hint: "Warm orange palette",
+    preview: "from-[#fff7ed] to-[#ffedd5]",
+  },
+  {
+    id: "ocean",
+    label: "Ocean",
+    hint: "Cool blue palette",
+    preview: "from-[#f0f9ff] to-[#e0f2fe]",
+  },
+]
+
+const LAYOUT_LABEL: Record<PptLayout, string> = {
+  standard: "Standard",
+  hook: "Hook",
+  compare: "Compare",
+  quiz: "Quiz",
+  quote: "Quote",
+  summary: "Summary",
+}
+
+function styleAccent(style: PptStyle) {
+  if (style === "bold") return "text-amber-400"
+  if (style === "sunset") return "text-orange-600"
+  if (style === "ocean") return "text-sky-600"
+  if (style === "creative") return "text-rose-600"
+  return "text-brand"
+}
+
+function styleHeading(style: PptStyle) {
+  if (style === "bold") return "text-white"
+  if (style === "sunset") return "text-orange-950"
+  if (style === "ocean") return "text-sky-950"
+  if (style === "creative") return "text-indigo-950"
+  return "text-brand"
 }
 
 export function CreatePptPage() {
@@ -36,12 +102,16 @@ export function CreatePptPage() {
 
   const [prompt, setPrompt] = useState("")
   const [slideCount, setSlideCount] = useState(8)
+  const [style, setStyle] = useState<PptStyle>("creative")
   const [busy, setBusy] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState("")
   const [outline, setOutline] = useState<PptOutline | null>(null)
   const [slideIndex, setSlideIndex] = useState(0)
   const [doneName, setDoneName] = useState("")
+
+  const activeStyle = outline?.style || style
+  const styleMeta = STYLES.find((s) => s.id === activeStyle) || STYLES[0]
 
   useEffect(() => {
     if (!bucketId && buckets[0]) {
@@ -65,9 +135,11 @@ export function CreatePptPage() {
           bucket_id: bucketId,
           prompt: text,
           slide_count: slideCount,
+          style,
         }),
       })
       setOutline(res)
+      if (res.style) setStyle(res.style)
       setSlideIndex(0)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate PPT")
@@ -87,6 +159,7 @@ export function CreatePptPage() {
           bucket_id: bucketId,
           title: outline.title,
           slides: outline.slides,
+          style: outline.style || style,
         }),
       })
       triggerBlobDownload(blob, filename)
@@ -103,12 +176,10 @@ export function CreatePptPage() {
         {
           kind: "title" as const,
           heading: outline.title,
-          bullets: ["Generated from your AI Bucket notes"],
         },
         ...outline.slides.map((s) => ({
           kind: "content" as const,
-          heading: s.heading,
-          bullets: s.bullets,
+          ...s,
         })),
       ]
     : []
@@ -135,7 +206,7 @@ export function CreatePptPage() {
             Create PPT
           </h1>
           <p className="text-xs text-muted-foreground">
-            Preview from indexed notes, then download when you’re ready
+            Creative, styled decks from your notes — preview then download
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -162,24 +233,47 @@ export function CreatePptPage() {
       </header>
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(18rem,24rem)_1fr]">
-        {/* Controls */}
         <div className="overflow-y-auto border-b border-border/70 bg-white/80 p-4 sm:p-5 lg:border-b-0 lg:border-r">
           <p className="mb-3 text-xs text-muted-foreground">
             Using <span className="font-medium text-foreground">{activeBucket?.name}</span>
           </p>
           <form onSubmit={generate} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="ppt-prompt">Prompt</Label>
+              <Label htmlFor="ppt-prompt">Topic / prompt</Label>
               <textarea
                 id="ppt-prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 disabled={busy}
-                rows={6}
-                placeholder="e.g. Create a PPT on Calculus chapter 2"
+                rows={5}
+                placeholder="e.g. Calculus — rate of change, with real-life examples and a quiz slide"
                 className="w-full resize-y rounded-xl border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               />
             </div>
+
+            <div className="space-y-2">
+              <Label>Visual style</Label>
+              <div className="grid gap-2">
+                {STYLES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setStyle(s.id)}
+                    className={cn(
+                      "rounded-xl border px-3 py-2.5 text-left transition",
+                      style === s.id
+                        ? "border-brand bg-brand-soft"
+                        : "border-border/80 hover:border-border",
+                    )}
+                  >
+                    <p className="text-sm font-medium">{s.label}</p>
+                    <p className="text-[11px] text-muted-foreground">{s.hint}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="ppt-slides">Number of slides</Label>
               <div className="flex flex-wrap items-center gap-2">
@@ -215,9 +309,14 @@ export function CreatePptPage() {
                 ))}
               </div>
             </div>
+
             <Button type="submit" disabled={busy || !prompt.trim()} className="w-full gap-2">
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Presentation className="size-4" />}
-              {busy ? "Generating…" : outline ? "Regenerate preview" : "Generate preview"}
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Presentation className="size-4" />
+              )}
+              {busy ? "Generating…" : outline ? "Regenerate deck" : "Generate creative deck"}
             </Button>
           </form>
           {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
@@ -226,14 +325,16 @@ export function CreatePptPage() {
           ) : null}
         </div>
 
-        {/* Preview stage — full remaining width */}
         <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto bg-[#f3f6f8] p-4 sm:p-6">
           {!outline && !busy ? (
             <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-border/80 bg-white/50 text-center text-sm text-muted-foreground">
               <div className="px-6 py-16">
                 <Presentation className="mx-auto mb-3 size-8 text-brand/50" />
-                <p className="font-medium text-foreground">Slide preview</p>
-                <p className="mt-1">Generate a preview to browse slides here at full width.</p>
+                <p className="font-medium text-foreground">Styled slide preview</p>
+                <p className="mt-1">
+                  Pick a style, describe your lesson, and generate a unique deck with hooks,
+                  comparisons, and quiz slides.
+                </p>
               </div>
             </div>
           ) : null}
@@ -241,7 +342,7 @@ export function CreatePptPage() {
           {busy ? (
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              Gathering notes and drafting slides…
+              Drafting a creative deck from your notes…
             </div>
           ) : null}
 
@@ -251,7 +352,7 @@ export function CreatePptPage() {
                 <div>
                   <p className="font-medium">{outline.title}</p>
                   <p className="text-xs text-muted-foreground">
-                    {outline.slide_count} content slides · title slide in preview
+                    {outline.slide_count} slides · {styleMeta.label} style
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -284,24 +385,78 @@ export function CreatePptPage() {
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-[#f7f9fd] to-[#eef5f1] shadow-sm">
+              <div
+                className={cn(
+                  "overflow-hidden rounded-xl border border-border/80 shadow-sm",
+                  activeStyle === "bold"
+                    ? "bg-gradient-to-br from-[#111827] to-[#1f2937]"
+                    : `bg-gradient-to-br ${styleMeta.preview}`,
+                )}
+              >
+                <div className="h-1.5 bg-brand" />
                 <div className="aspect-[16/9] p-6 sm:p-10 lg:p-12">
                   {current.kind === "title" ? (
                     <div className="flex h-full flex-col justify-center">
-                      <p className="font-display text-3xl tracking-tight text-brand sm:text-4xl">
+                      <p
+                        className={cn(
+                          "font-display text-3xl tracking-tight sm:text-4xl",
+                          styleHeading(activeStyle),
+                        )}
+                      >
                         {current.heading}
                       </p>
-                      <p className="mt-4 text-base text-muted-foreground">{current.bullets[0]}</p>
                     </div>
                   ) : (
                     <div className="flex h-full flex-col">
-                      <h3 className="font-display text-2xl tracking-tight text-brand sm:text-3xl">
-                        {current.heading}
-                      </h3>
-                      <ul className="mt-6 space-y-3 overflow-y-auto text-base text-foreground/90 sm:text-lg">
+                      {"subtitle" in current && current.subtitle ? (
+                        <p className={cn("text-xs font-semibold uppercase tracking-wide", styleAccent(activeStyle))}>
+                          {current.subtitle}
+                        </p>
+                      ) : null}
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <h3
+                          className={cn(
+                            "font-display text-2xl tracking-tight sm:text-3xl",
+                            styleHeading(activeStyle),
+                          )}
+                        >
+                          {current.heading}
+                        </h3>
+                        {"layout" in current && current.layout && current.layout !== "standard" ? (
+                          <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            {LAYOUT_LABEL[current.layout]}
+                          </span>
+                        ) : null}
+                      </div>
+                      {"callout" in current && current.callout ? (
+                        <div
+                          className={cn(
+                            "mt-4 rounded-xl border px-4 py-3 text-sm font-medium",
+                            activeStyle === "bold"
+                              ? "border-amber-500/40 bg-gray-800 text-amber-100"
+                              : "border-brand/20 bg-white/80 text-foreground",
+                          )}
+                        >
+                          {current.layout === "quote" ? `"${current.callout}"` : current.callout}
+                        </div>
+                      ) : null}
+                      <ul
+                        className={cn(
+                          "mt-4 space-y-2 overflow-y-auto text-base sm:text-lg",
+                          activeStyle === "bold" ? "text-gray-100" : "text-foreground/90",
+                          "layout" in current && current.layout === "compare"
+                            ? "grid gap-4 sm:grid-cols-2"
+                            : "",
+                        )}
+                      >
                         {current.bullets.map((b, i) => (
                           <li key={i} className="flex gap-3">
-                            <span className="mt-2 size-2 shrink-0 rounded-full bg-brand" />
+                            <span
+                              className={cn(
+                                "mt-2 size-2 shrink-0 rounded-full",
+                                activeStyle === "bold" ? "bg-amber-400" : "bg-brand",
+                              )}
+                            />
                             <span>{b}</span>
                           </li>
                         ))}
@@ -352,7 +507,11 @@ export function CreatePptPage() {
                     )}
                   >
                     <p className="text-[10px] text-muted-foreground">
-                      {s.kind === "title" ? "Title" : `Slide ${i}`}
+                      {s.kind === "title"
+                        ? "Title"
+                        : "layout" in s && s.layout
+                          ? LAYOUT_LABEL[s.layout]
+                          : `Slide ${i}`}
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-[11px] font-medium leading-snug">
                       {s.heading}

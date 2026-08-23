@@ -78,15 +78,27 @@ class GeneratePptxRequestSerializer(serializers.Serializer):
     prompt = serializers.CharField(max_length=2000)
     bucket_id = serializers.IntegerField()
     slide_count = serializers.IntegerField(required=False, default=8, min_value=3, max_value=15)
+    style = serializers.ChoiceField(
+        choices=["creative", "clean", "bold", "sunset", "ocean"],
+        required=False,
+        default="creative",
+    )
 
 
 class PptxSlideSerializer(serializers.Serializer):
     heading = serializers.CharField(max_length=200)
+    subtitle = serializers.CharField(required=False, allow_blank=True, max_length=200, default="")
+    layout = serializers.ChoiceField(
+        choices=["standard", "hook", "compare", "quiz", "quote", "summary"],
+        required=False,
+        default="standard",
+    )
     bullets = serializers.ListField(
         child=serializers.CharField(max_length=500),
         allow_empty=False,
         max_length=10,
     )
+    callout = serializers.CharField(required=False, allow_blank=True, max_length=300, default="")
     notes = serializers.CharField(required=False, allow_blank=True, max_length=1000, default="")
 
 
@@ -94,6 +106,11 @@ class DownloadPptxRequestSerializer(serializers.Serializer):
     bucket_id = serializers.IntegerField()
     title = serializers.CharField(max_length=200)
     slides = PptxSlideSerializer(many=True)
+    style = serializers.ChoiceField(
+        choices=["creative", "clean", "bold", "sunset", "ocean"],
+        required=False,
+        default="creative",
+    )
 
     def validate_slides(self, value):
         if not value:
