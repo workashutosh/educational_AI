@@ -191,16 +191,24 @@ RAG_MAX_CONTEXT_CHARS = env.int("RAG_MAX_CONTEXT_CHARS", default=7000)
 RAG_MAX_CHUNK_CHARS = env.int("RAG_MAX_CHUNK_CHARS", default=1100)
 
 # ---------------------------------------------------------------------------
-# Groq — the only LLM call anywhere in this pipeline: query-time answer
-# generation on top of retrieval (ingestion/services/answer_service.py,
-# POST /api/ask/). One call per question, free tier, OpenAI-compatible API.
+# Chat LLM — DeepSeek preferred (OpenAI-compatible), Groq fallback.
+# Used by /api/ask/, PPT, mock tests, micro-quiz, RAG harness.
+# Docs: https://api-docs.deepseek.com/
+# OCR (PaddleOCR-VL) is unrelated — do not route OCR through this.
 # ---------------------------------------------------------------------------
+DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY", default="")
+DEEPSEEK_MODEL = env("DEEPSEEK_MODEL", default="deepseek-v4-flash")
+DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", default="https://api.deepseek.com")
+# disabled | enabled — thinking mode (DeepSeek V4); keep disabled for latency
+DEEPSEEK_THINKING = env("DEEPSEEK_THINKING", default="disabled")
+DEEPSEEK_REASONING_EFFORT = env("DEEPSEEK_REASONING_EFFORT", default="high")
+
 GROQ_API_KEY = env("GROQ_API_KEY", default="")
 GROQ_MODEL = env("GROQ_MODEL", default="llama-3.3-70b-versatile")
 
 # ---------------------------------------------------------------------------
 # RAG harness (rag_harness.agent.run_query) — shared query/retrieval layer
-# for future agents. Reuses GROQ_* / PAGEINDEX_MODEL + GEMINI_API_KEY above.
+# for future agents. Reuses DEEPSEEK_* / GROQ_* / PAGEINDEX_MODEL above.
 # ---------------------------------------------------------------------------
 RAG_HARNESS_TOP_K = env.int("RAG_HARNESS_TOP_K", default=5)
 RAG_HARNESS_MAX_CONTEXT_CHARS = env.int("RAG_HARNESS_MAX_CONTEXT_CHARS", default=12000)

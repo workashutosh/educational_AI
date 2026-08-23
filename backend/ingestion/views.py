@@ -41,6 +41,7 @@ from .serializers import (
     BucketAccessSerializer,
     ChatMessageSerializer,
     ChatSessionSerializer,
+    CreateMemberSerializer,
     CreateStudentSerializer,
     DocumentSerializer,
     DocumentStatusSerializer,
@@ -48,6 +49,7 @@ from .serializers import (
     DownloadPptxRequestSerializer,
     GeneratePptxRequestSerializer,
     GrantAccessSerializer,
+    MemberAccessSerializer,
     QueryRequestSerializer,
     SubjectBucketCreateSerializer,
     SubjectBucketSerializer,
@@ -459,7 +461,7 @@ class AskView(APIView):
 class GeneratePptxView(APIView):
     """POST /api/generate-pptx/ — RAG + Groq → JSON outline for in-app preview."""
 
-    permission_classes = [IsSchoolMember, HasBucketAccess]
+    permission_classes = [IsSchoolMember, HasBucketAccess, CanUpload]
 
     def get_bucket_id(self):
         return self.request.data.get("bucket_id")
@@ -522,7 +524,7 @@ class GeneratePptxView(APIView):
 class DownloadPptxView(APIView):
     """POST /api/generate-pptx/download/ — build .pptx from a previewed outline."""
 
-    permission_classes = [IsSchoolMember, HasBucketAccess]
+    permission_classes = [IsSchoolMember, HasBucketAccess, CanUpload]
 
     def get_bucket_id(self):
         return self.request.data.get("bucket_id")
@@ -624,7 +626,13 @@ class AdminMembersListView(APIView):
         # Teachers only need the student roster for provisioning UI.
         if member.role == SchoolMembership.ROLE_TEACHER and not role:
             rows = rows.filter(role=SchoolMembership.ROLE_STUDENT)
-        rows = rows.order_by("role", "user__username")
+        rows = list(rows.order_by("role", "user__username"))
+        grant_map: dict[int, list[int]] = {}
+        if member.is_manager_or_above and rows:
+            for ga in BucketAccess.objects.filter(
+                member_id__in=[m.id for m in rows]
+            ).values_list("member_id", "bucket_id"):
+                grant_map.setdefault(ga[0], []).append(ga[1])
         return Response(
             [
                 {
@@ -634,104 +642,260 @@ class AdminMembersListView(APIView):
                     "full_name": m.user.first_name or "",
                     "role": m.role,
                     "role_display": m.get_role_display(),
+                    "full_access": m.is_manager_or_above,
+                    "bucket_ids": (
+                        []
+                        if m.is_manager_or_above
+                        else grant_map.get(m.id, [])
+                    ),
                 }
                 for m in rows
             ]
         )
 
 
-class AdminCreateStudentView(APIView):
-    """
-    POST /api/admin/students/ — admin/manager/teacher creates a student login.
+def _roles_actor_may_create(actor: SchoolMembership) -> set[str]:
+    if actor.role == SchoolMembership.ROLE_ADMIN:
+        return {
+            SchoolMembership.ROLE_ADMIN,
+            SchoolMembership.ROLE_MANAGER,
+            SchoolMembership.ROLE_TEACHER,
+            SchoolMembership.ROLE_STUDENT,
+        }
+    if actor.role == SchoolMembership.ROLE_MANAGER:
+        return {
+            SchoolMembership.ROLE_TEACHER,
+            SchoolMembership.ROLE_STUDENT,
+        }
+    if actor.can_create_students:
+        return {SchoolMembership.ROLE_STUDENT}
+    return set()
 
-    Body: {username, password, full_name?, email?, bucket_id?}
-    Students sign in via /api/auth/login/ with those credentials.
+
+def _create_school_member(actor: SchoolMembership, data: dict):
+    """Shared create path for /admin/members/ and /admin/students/."""
+    school = actor.school
+    role = data["role"]
+    allowed = _roles_actor_may_create(actor)
+    if role not in allowed:
+        return Response(
+            {"detail": f"Your role cannot create {role} accounts."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not school.can_add_member():
+        return Response(
+            {
+                "detail": (
+                    f"School user seat limit reached ({school.max_users}). "
+                    "Upgrade the plan or deactivate unused accounts."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if role == SchoolMembership.ROLE_MANAGER and not school.can_add_manager():
+        return Response(
+            {
+                "detail": (
+                    f"Manager seat limit reached ({school.max_managers}). "
+                    "Upgrade the plan or deactivate a manager."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    username = data["username"]
+    password = data["password"]
+    full_name = (data.get("full_name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    bucket_ids = list(data.get("bucket_ids") or [])
+
+    if not username:
+        return Response(
+            {"detail": "Username is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if User.objects.filter(username__iexact=username).exists():
+        return Response(
+            {"detail": "That username is already taken."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if email and User.objects.filter(email__iexact=email).exists():
+        return Response(
+            {"detail": "That email is already in use."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Only teacher/student need explicit bucket grants; admin/manager see all.
+    grant_buckets: list[SubjectBucket] = []
+    if role in {SchoolMembership.ROLE_TEACHER, SchoolMembership.ROLE_STUDENT} and bucket_ids:
+        if not actor.is_manager_or_above:
+            # Teachers may only grant buckets they themselves can access.
+            for bid in bucket_ids:
+                bucket = get_object_or_404(SubjectBucket, pk=bid, school=school)
+                if not actor.has_bucket_access(bucket):
+                    return Response(
+                        {"detail": "You do not have access to that AI Bucket."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                grant_buckets.append(bucket)
+        else:
+            grant_buckets = list(
+                SubjectBucket.objects.filter(pk__in=bucket_ids, school=school, is_archived=False)
+            )
+
+    with transaction.atomic():
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password,
+            first_name=full_name[:150],
+        )
+        member = SchoolMembership.objects.create(
+            school=school,
+            user=user,
+            role=role,
+            is_active=True,
+        )
+        granted_ids: list[int] = []
+        for bucket in grant_buckets:
+            BucketAccess.objects.get_or_create(
+                member=member,
+                bucket=bucket,
+                defaults={"granted_by": actor},
+            )
+            granted_ids.append(bucket.id)
+
+    return Response(
+        {
+            "id": member.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.first_name or "",
+            "role": member.role,
+            "role_display": member.get_role_display(),
+            "bucket_ids": granted_ids,
+            "bucket_granted": granted_ids[0] if len(granted_ids) == 1 else None,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+class AdminCreateMemberView(APIView):
     """
+    POST /api/admin/members/ — create admin / manager / teacher / student.
+
+    Role rules:
+      - Admin: any role
+      - Manager: teacher, student
+      - Teacher: student only
+    """
+
+    permission_classes = [CanCreateStudents]
+
+    def post(self, request):
+        serializer = CreateMemberSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return _create_school_member(request.member, serializer.validated_data)
+
+
+class AdminCreateStudentView(APIView):
+    """POST /api/admin/students/ — back-compat student-only create."""
 
     permission_classes = [CanCreateStudents]
 
     def post(self, request):
         serializer = CreateStudentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        actor = request.member
-        school = actor.school
+        data = dict(serializer.validated_data)
+        data["role"] = SchoolMembership.ROLE_STUDENT
+        if data.get("bucket_id") is not None:
+            data["bucket_ids"] = [data["bucket_id"]]
+        else:
+            data["bucket_ids"] = []
+        return _create_school_member(request.member, data)
 
-        if not school.can_add_member():
+
+class AdminMemberAccessView(APIView):
+    """
+    GET/PUT /api/admin/members/<member_id>/access/
+    Manage which AI Buckets a teacher/student can use.
+    """
+
+    permission_classes = [IsManagerOrAdmin]
+
+    def get(self, request, member_id: int):
+        actor = request.member
+        target = get_object_or_404(
+            SchoolMembership, pk=member_id, school=actor.school, is_active=True
+        )
+        grants = BucketAccess.objects.filter(member=target).select_related("bucket")
+        return Response(
+            {
+                "member_id": target.id,
+                "role": target.role,
+                "username": target.user.username,
+                "full_access": target.is_manager_or_above,
+                "bucket_ids": [g.bucket_id for g in grants],
+                "grants": [
+                    {
+                        "bucket_id": g.bucket_id,
+                        "bucket_name": g.bucket.name,
+                        "granted_at": g.granted_at,
+                    }
+                    for g in grants
+                ],
+            }
+        )
+
+    def put(self, request, member_id: int):
+        actor = request.member
+        target = get_object_or_404(
+            SchoolMembership, pk=member_id, school=actor.school, is_active=True
+        )
+        if target.is_manager_or_above:
             return Response(
                 {
                     "detail": (
-                        f"School user seat limit reached ({school.max_users}). "
-                        "Upgrade the plan or deactivate unused accounts."
+                        "Admins and managers already have access to every AI Bucket. "
+                        "No per-bucket grants needed."
                     )
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        username = serializer.validated_data["username"]
-        password = serializer.validated_data["password"]
-        full_name = (serializer.validated_data.get("full_name") or "").strip()
-        email = (serializer.validated_data.get("email") or "").strip().lower()
-        bucket_id = serializer.validated_data.get("bucket_id")
-
-        if not username:
+        serializer = MemberAccessSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        wanted = set(serializer.validated_data["bucket_ids"])
+        valid = set(
+            SubjectBucket.objects.filter(
+                school=actor.school, is_archived=False, pk__in=wanted
+            ).values_list("id", flat=True)
+        )
+        invalid = wanted - valid
+        if invalid:
             return Response(
-                {"detail": "Username is required."},
+                {"detail": f"Unknown or archived bucket id(s): {sorted(invalid)}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if User.objects.filter(username__iexact=username).exists():
-            return Response(
-                {"detail": "That username is already taken."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if email and User.objects.filter(email__iexact=email).exists():
-            return Response(
-                {"detail": "That email is already in use."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        bucket = None
-        if bucket_id is not None:
-            bucket = get_object_or_404(SubjectBucket, pk=bucket_id, school=school)
-            if not actor.has_bucket_access(bucket):
-                return Response(
-                    {"detail": "You do not have access to that AI Bucket."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
 
         with transaction.atomic():
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password,
-                first_name=full_name[:150],
+            existing = set(
+                BucketAccess.objects.filter(member=target).values_list("bucket_id", flat=True)
             )
-            student = SchoolMembership.objects.create(
-                school=school,
-                user=user,
-                role=SchoolMembership.ROLE_STUDENT,
-                is_active=True,
-            )
-            granted = False
-            if bucket is not None:
+            to_add = valid - existing
+            to_remove = existing - valid
+            if to_remove:
+                BucketAccess.objects.filter(member=target, bucket_id__in=to_remove).delete()
+            for bid in to_add:
                 BucketAccess.objects.get_or_create(
-                    member=student,
-                    bucket=bucket,
+                    member=target,
+                    bucket_id=bid,
                     defaults={"granted_by": actor},
                 )
-                granted = True
 
-        return Response(
-            {
-                "id": student.id,
-                "username": user.username,
-                "email": user.email,
-                "full_name": user.first_name or "",
-                "role": student.role,
-                "role_display": student.get_role_display(),
-                "bucket_granted": bucket.id if granted else None,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return self.get(request, member_id)
 
 
 class AdminBucketCreateView(APIView):

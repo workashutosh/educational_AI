@@ -87,6 +87,7 @@ def _blueprint_fields(test: MockTest) -> dict:
         "max_score": test.computed_max_score() or test.blueprint_max_score,
         "results_mode": test.results_mode,
         "source_mode": test.source_mode,
+        "reference_document_ids": test.reference_document_ids or [],
     }
 
 
@@ -288,6 +289,7 @@ class MockTestListCreateView(APIView):
                 marks_brief=vd.get("marks_brief", 5),
                 results_mode=vd.get("results_mode") or MockTest.RESULTS_AFTER_REVIEW,
                 source_mode=vd.get("source_mode") or MockTest.SOURCE_NOTES,
+                reference_document_ids=vd.get("reference_document_ids") or None,
             )
         except DjangoPermissionDenied as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)

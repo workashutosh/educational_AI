@@ -43,6 +43,7 @@ export type DocumentRow = {
   kind?: DocumentKind
   status: string
   error_message: string
+  progress_message?: string
   page_count: number | null
   duplicate_of: number | null
   created_at: string
@@ -91,6 +92,8 @@ export type MemberRow = {
   full_name: string
   role: string
   role_display: string
+  full_access?: boolean
+  bucket_ids?: number[]
 }
 
 export type AccessGrant = {
@@ -110,6 +113,8 @@ export type Session = {
   can_manage: boolean
   can_upload: boolean
   can_create_students?: boolean
+  /** Roles this user may create via Members UI */
+  creatable_roles?: string[]
 }
 
 const TOKEN_KEY = "education_ai_token"
@@ -298,7 +303,7 @@ export function formatBytes(n: number | null | undefined): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function statusLabel(status: string): string {
+export function statusLabel(status: string, progressMessage?: string | null): string {
   const map: Record<string, string> = {
     queued: "Waiting…",
     parsing: "Reading…",
@@ -307,7 +312,13 @@ export function statusLabel(status: string): string {
     duplicate: "Duplicate",
     failed: "Failed",
   }
-  return map[status] || status
+  const base = map[status] || status
+  const progress = (progressMessage || "").trim()
+  if (progress && (status === "parsing" || status === "indexing")) {
+    // e.g. "Reading… 4/16 pages" or "Crunching… 12/40 chunks"
+    return `${base.replace(/…$/, "")} (${progress})`
+  }
+  return base
 }
 
 export function isPendingStatus(status: string): boolean {

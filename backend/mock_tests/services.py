@@ -6,13 +6,13 @@ import logging
 import re
 from typing import Any
 
-import requests
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
 from ingestion.models import Document, SchoolMembership, SubjectBucket
 from ingestion.services.brevo_service import BrevoError, send_transactional_email
+from ingestion.services.llm_provider import chat_completion, get_chat_llm
 from rag_harness.bucket_router import get_indexed_documents
 from rag_harness.context_builder import build_context
 from rag_harness.exceptions import HarnessLLMError
@@ -22,8 +22,6 @@ from rag_harness.retriever import retrieve
 from .models import MockAnswerGrade, MockAttempt, MockQuestion, MockTest
 
 logger = logging.getLogger(__name__)
-
-_GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 _SYSTEM_BASE = (
     "Use ONLY the numbered source excerpts. Do not invent unsupported facts.\n"
@@ -75,6 +73,90 @@ def source_mode_to_kinds(source_mode: str) -> list[str]:
     return [Document.KIND_NOTES]
 
 
+def _validated_reference_paper_ids(
+    bucket: SubjectBucket,
+    reference_document_ids: list[int] | None,
+    *,
+    required: bool,
+) -> list[int]:
+    """Return indexed question-paper IDs in this bucket (subset if ids given)."""
+    indexed = list(
+        get_indexed_documents(bucket, kinds=[Document.KIND_QUESTION_PAPER]).values_list(
+            "id", flat=True
+        )
+    )
+    if not indexed:
+        if required:
+            raise MockTestGenerationError(
+                "No indexed previous-year papers in this AI Bucket. "
+                "Upload question papers under the Question papers tab first."
+            )
+        return []
+
+    allowed = {int(i) for i in indexed}
+    raw = reference_document_ids or []
+    if not raw:
+        return sorted(allowed)
+
+    picked: list[int] = []
+    seen: set[int] = set()
+    for item in raw:
+        try:
+            doc_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if doc_id not in allowed:
+            raise MockTestGenerationError(
+                f"Question paper #{doc_id} is not indexed in this AI Bucket."
+            )
+        if doc_id not in seen:
+            seen.add(doc_id)
+            picked.append(doc_id)
+    if required and not picked:
+        raise MockTestGenerationError("Select at least one indexed question paper.")
+    return picked
+
+
+def _retrieve_for_mock(
+    bucket: SubjectBucket,
+    *,
+    prompt: str,
+    top_k: int,
+    source_mode: str,
+    reference_document_ids: list[int] | None,
+) -> list[dict[str, Any]]:
+    if source_mode == MockTest.SOURCE_NOTES:
+        return retrieve(bucket, query=prompt, top_k=top_k, kinds=[Document.KIND_NOTES])
+
+    paper_ids = _validated_reference_paper_ids(
+        bucket, reference_document_ids, required=True
+    )
+    if source_mode == MockTest.SOURCE_QUESTION_PAPERS:
+        return retrieve(
+            bucket,
+            query=prompt,
+            top_k=top_k,
+            kinds=[Document.KIND_QUESTION_PAPER],
+            document_ids=paper_ids,
+        )
+
+    k_notes = max(4, top_k // 2)
+    k_papers = max(4, top_k - k_notes)
+    notes_nodes = retrieve(
+        bucket, query=prompt, top_k=k_notes, kinds=[Document.KIND_NOTES]
+    )
+    paper_nodes = retrieve(
+        bucket,
+        query=prompt,
+        top_k=k_papers,
+        kinds=[Document.KIND_QUESTION_PAPER],
+        document_ids=paper_ids,
+    )
+    merged = notes_nodes + paper_nodes
+    merged.sort(key=lambda n: n.get("score") or 0.0, reverse=True)
+    return merged[:top_k]
+
+
 def system_prompt_for_source(source_mode: str) -> str:
     if source_mode == MockTest.SOURCE_QUESTION_PAPERS:
         return _SYSTEM_PAPERS
@@ -110,6 +192,7 @@ def generate_mock_test(
     marks_brief: int = 5,
     results_mode: str = MockTest.RESULTS_AFTER_REVIEW,
     source_mode: str = MockTest.SOURCE_NOTES,
+    reference_document_ids: list[int] | None = None,
 ) -> MockTest:
     prompt = (prompt or "").strip()
     if not prompt:
@@ -132,23 +215,35 @@ def generate_mock_test(
     check_bucket_access(member, bucket)
 
     kinds = source_mode_to_kinds(source_mode)
-    if not get_indexed_documents(bucket, kinds=kinds).exists():
-        if source_mode == MockTest.SOURCE_QUESTION_PAPERS:
+    if source_mode == MockTest.SOURCE_NOTES:
+        if not get_indexed_documents(bucket, kinds=kinds).exists():
             raise MockTestGenerationError(
-                "No indexed previous-year papers in this AI Bucket. "
-                "Upload question papers under the Question papers tab first."
+                "No indexed notes in this AI Bucket. Upload and index notes first."
             )
-        if source_mode == MockTest.SOURCE_BOTH:
+    elif source_mode == MockTest.SOURCE_QUESTION_PAPERS:
+        _validated_reference_paper_ids(bucket, reference_document_ids, required=True)
+    else:
+        if not get_indexed_documents(bucket, kinds=[Document.KIND_NOTES]).exists():
             raise MockTestGenerationError(
-                "No indexed notes or previous-year papers in this AI Bucket yet."
+                "No indexed notes in this AI Bucket. Upload and index notes first."
             )
-        raise MockTestGenerationError(
-            "No indexed notes in this AI Bucket. Upload and index notes first."
+        _validated_reference_paper_ids(bucket, reference_document_ids, required=True)
+
+    stored_paper_ids: list[int] = []
+    if source_mode in (MockTest.SOURCE_QUESTION_PAPERS, MockTest.SOURCE_BOTH):
+        stored_paper_ids = _validated_reference_paper_ids(
+            bucket, reference_document_ids, required=False
         )
 
     top_k = max(8, min(24, total + 4))
     try:
-        nodes = retrieve(bucket, query=prompt, top_k=top_k, kinds=kinds)
+        nodes = _retrieve_for_mock(
+            bucket,
+            prompt=prompt,
+            top_k=top_k,
+            source_mode=source_mode,
+            reference_document_ids=stored_paper_ids or reference_document_ids,
+        )
     except Exception as exc:
         logger.exception("Mock test retrieval failed")
         raise MockTestGenerationError("Could not retrieve sources for this topic.") from exc
@@ -212,6 +307,7 @@ def generate_mock_test(
                 in (MockTest.RESULTS_IMMEDIATE, MockTest.RESULTS_AFTER_REVIEW)
                 else MockTest.RESULTS_AFTER_REVIEW
             ),
+            reference_document_ids=stored_paper_ids,
         )
         rows = []
         for i, q in enumerate(outline["questions"], start=1):
@@ -255,6 +351,7 @@ def apply_draft_settings(test: MockTest, updates: dict) -> list[str]:
         "marks_brief": "marks_brief",
         "results_mode": "results_mode",
         "source_mode": "source_mode",
+        "reference_document_ids": "reference_document_ids",
     }
     for key, attr in mapping.items():
         if key not in updates:
@@ -266,6 +363,15 @@ def apply_draft_settings(test: MockTest, updates: dict) -> list[str]:
             val = str(val).strip()
             if not val:
                 raise MockTestGenerationError("Topic / instructions cannot be empty.")
+        elif key == "reference_document_ids":
+            if not isinstance(val, list):
+                raise MockTestGenerationError("reference_document_ids must be a list.")
+            val = _validated_reference_paper_ids(
+                test.bucket,
+                [int(x) for x in val if x is not None],
+                required=test.source_mode
+                in (MockTest.SOURCE_QUESTION_PAPERS, MockTest.SOURCE_BOTH),
+            )
         setattr(test, attr, val)
         fields.append(attr)
 
@@ -309,6 +415,7 @@ def regenerate_questions(
         marks_brief=test.marks_brief,
         results_mode=test.results_mode,
         source_mode=test.source_mode,
+        reference_document_ids=test.reference_document_ids or None,
     )
     # Move questions onto original test, drop the temp test
     with transaction.atomic():
@@ -325,6 +432,7 @@ def regenerate_questions(
         test.marks_brief = new.marks_brief
         test.results_mode = new.results_mode
         test.source_mode = new.source_mode
+        test.reference_document_ids = new.reference_document_ids
         test.save(
             update_fields=[
                 "question_count",
@@ -338,6 +446,7 @@ def regenerate_questions(
                 "marks_brief",
                 "results_mode",
                 "source_mode",
+                "reference_document_ids",
             ]
         )
         new.delete()
@@ -497,11 +606,17 @@ def _pad_or_trim(items: list[dict], count: int, qtype: str) -> list[dict]:
 
 
 def _resolve_model() -> tuple[str, str]:
+    """Prefer DeepSeek/Groq chat provider; else Gemini via LiteLLM."""
+    try:
+        cfg = get_chat_llm()
+        return "chat_http", cfg.model
+    except RuntimeError:
+        pass
     if getattr(settings, "GEMINI_API_KEY", ""):
         return "litellm", getattr(settings, "PAGEINDEX_MODEL", "gemini/gemini-2.5-flash")
-    if getattr(settings, "GROQ_API_KEY", ""):
-        return "groq_http", getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
-    raise HarnessLLMError("No LLM configured. Set GROQ_API_KEY or GEMINI_API_KEY.")
+    raise HarnessLLMError(
+        "No LLM configured. Set DEEPSEEK_API_KEY (preferred), GROQ_API_KEY, or GEMINI_API_KEY."
+    )
 
 
 def _call_llm_json(
@@ -525,7 +640,27 @@ def _call_llm_json(
     provider, model = _resolve_model()
     if provider == "litellm":
         return _litellm(messages, model, max_tokens=8192)
-    return _groq_http(messages, model, max_tokens=8192)
+    try:
+        return chat_completion(
+            messages,
+            temperature=0.3,
+            max_tokens=8192,
+            response_format={"type": "json_object"},
+            timeout=120,
+            retries_on_429=1,
+        )
+    except Exception:
+        # Some models reject response_format — retry without it.
+        try:
+            return chat_completion(
+                messages,
+                temperature=0.3,
+                max_tokens=8192,
+                timeout=120,
+                retries_on_429=1,
+            )
+        except Exception as exc:
+            raise HarnessLLMError(f"Chat LLM error: {exc}") from exc
 
 
 def _litellm(messages: list[dict], model: str, max_tokens: int = 4096) -> str:
@@ -533,11 +668,6 @@ def _litellm(messages: list[dict], model: str, max_tokens: int = 4096) -> str:
         from litellm import completion
     except ImportError as exc:
         raise HarnessLLMError("litellm is not installed") from exc
-    groq_key = getattr(settings, "GROQ_API_KEY", "")
-    if groq_key:
-        import os
-
-        os.environ.setdefault("GROQ_API_KEY", groq_key)
     try:
         resp = completion(
             model=model,
@@ -558,34 +688,6 @@ def _litellm(messages: list[dict], model: str, max_tokens: int = 4096) -> str:
             return resp.choices[0].message.content.strip()
         except Exception as exc2:
             raise HarnessLLMError(f"LiteLLM error: {exc2}") from exc2
-
-
-def _groq_http(messages: list[dict], model: str, max_tokens: int = 4096) -> str:
-    api_key = getattr(settings, "GROQ_API_KEY", "")
-    try:
-        response = requests.post(
-            _GROQ_CHAT_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": 0.3,
-                "max_tokens": max_tokens,
-                "response_format": {"type": "json_object"},
-            },
-            timeout=120,
-        )
-    except requests.RequestException as exc:
-        raise HarnessLLMError(f"Groq request failed: {exc}") from exc
-    if response.status_code != 200:
-        raise HarnessLLMError(f"Groq API error ({response.status_code})")
-    try:
-        return response.json()["choices"][0]["message"]["content"].strip()
-    except Exception as exc:
-        raise HarnessLLMError("Groq returned an empty response") from exc
 
 
 def grade_brief_answer(
@@ -614,7 +716,13 @@ def grade_brief_answer(
         if provider == "litellm":
             raw = _litellm(messages, model, max_tokens=1024)
         else:
-            raw = _groq_http(messages, model, max_tokens=1024)
+            raw = chat_completion(
+                messages,
+                temperature=0.2,
+                max_tokens=1024,
+                response_format={"type": "json_object"},
+                timeout=60,
+            )
         text = raw.strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*", "", text)

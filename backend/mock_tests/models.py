@@ -67,6 +67,9 @@ class MockTest(models.Model):
         default=SOURCE_NOTES,
         help_text="Which indexed bucket documents to use when generating questions.",
     )
+    # When source_mode includes question papers, limit retrieval to these document IDs.
+    # Empty list = use all indexed papers in the bucket.
+    reference_document_ids = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     published_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)

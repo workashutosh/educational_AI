@@ -38,6 +38,7 @@ def search_bucket(
     top_k: int | None = None,
     *,
     kinds: list[str] | None = None,
+    document_ids: list[int] | None = None,
     min_score: float | None = None,
     expand_neighbors: bool | None = None,
 ) -> list[RetrievedChunk]:
@@ -54,6 +55,8 @@ def search_bucket(
     ).select_related("document")
     if kinds:
         qs = qs.filter(document__kind__in=kinds)
+    if document_ids:
+        qs = qs.filter(document_id__in=document_ids)
     rows = list(
         qs.values(
             "id",

@@ -11,6 +11,7 @@ import {
   PanelLeftOpen,
   Presentation,
   Settings2,
+  Users,
   Video,
   type LucideIcon,
 } from "lucide-react"
@@ -28,16 +29,21 @@ type NavItem = {
   end: boolean
   label: string
   icon: LucideIcon
-  requiresCreateStudents?: boolean
-  /** When true, hidden from student accounts */
-  staffOnly?: boolean
+  /** admin | manager | teacher | student — omit = all roles */
+  roles?: string[]
   /** Student-facing label override */
   studentLabel?: string
 }
 
 const nav: NavItem[] = [
   { to: "/app", end: true, label: "Home", icon: LayoutDashboard },
-  { to: "/app/buckets", end: false, label: "AI Buckets", icon: BookOpen, staffOnly: true },
+  {
+    to: "/app/buckets",
+    end: false,
+    label: "AI Buckets",
+    icon: BookOpen,
+    roles: ["admin", "manager", "teacher"],
+  },
   {
     to: "/app/chat",
     end: false,
@@ -45,7 +51,13 @@ const nav: NavItem[] = [
     studentLabel: "AI Chat",
     icon: MessageSquareText,
   },
-  { to: "/app/ppt", end: false, label: "Create PPT", icon: Presentation, staffOnly: true },
+  {
+    to: "/app/ppt",
+    end: false,
+    label: "Create PPT",
+    icon: Presentation,
+    roles: ["admin", "manager", "teacher"],
+  },
   {
     to: "/app/lectures",
     end: false,
@@ -61,12 +73,18 @@ const nav: NavItem[] = [
     icon: ClipboardList,
   },
   {
+    to: "/app/members",
+    end: false,
+    label: "Members",
+    icon: Users,
+    roles: ["admin", "manager"],
+  },
+  {
     to: "/app/students",
     end: false,
     label: "Students",
     icon: GraduationCap,
-    requiresCreateStudents: true,
-    staffOnly: true,
+    roles: ["teacher"],
   },
   { to: "/app/settings", end: false, label: "Settings", icon: Settings2 },
 ]
@@ -76,15 +94,15 @@ export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const school = session?.school
-  const isStudent = session?.membership?.role === "student"
+  const role = session?.membership?.role || ""
+  const isStudent = role === "student"
   const workspace =
     location.pathname.startsWith("/app/chat") ||
     (!isStudent && location.pathname.startsWith("/app/ppt"))
   const items = nav
     .filter((item) => {
-      if (isStudent && item.staffOnly) return false
-      if (item.requiresCreateStudents && !session?.can_create_students) return false
-      return true
+      if (!item.roles) return true
+      return item.roles.includes(role)
     })
     .map((item) => ({
       ...item,

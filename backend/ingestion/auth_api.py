@@ -89,9 +89,20 @@ def _member_payload(user: User, token_key: str | None = None) -> dict:
             "can_manage": member.is_manager_or_above,
             "can_upload": member.can_upload,
             "can_create_students": member.can_create_students,
+            "creatable_roles": _creatable_roles(member),
         }
     )
     return payload
+
+
+def _creatable_roles(member: SchoolMembership) -> list[str]:
+    if member.role == SchoolMembership.ROLE_ADMIN:
+        return ["admin", "manager", "teacher", "student"]
+    if member.role == SchoolMembership.ROLE_MANAGER:
+        return ["teacher", "student"]
+    if member.can_create_students:
+        return ["student"]
+    return []
 
 
 def _cleanup_expired_pending() -> None:

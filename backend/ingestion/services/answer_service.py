@@ -1,5 +1,5 @@
 """
-Query-time answer generation via Groq (OpenAI-compatible chat completions).
+Query-time answer generation via DeepSeek / Groq (OpenAI-compatible chat).
 
 Multi-turn: the client sends prior {role, content} turns; those are included
 in the chat so the model remembers the conversation. Retrieval for follow-ups
@@ -14,16 +14,15 @@ import logging
 import re
 from dataclasses import dataclass
 
-import requests
 from django.conf import settings
 
 from .llm_errors import raise_for_llm_response
+from .llm_provider import chat_completion_raw, extract_message_content, get_chat_llm
 from .retrieval_service import RetrievedChunk, search_bucket
 from ..models import Chunk
 
 logger = logging.getLogger(__name__)
 
-_GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 _MAX_HISTORY_MESSAGES = 12  # 6 user/assistant pairs
 
 _SYSTEM_PROMPT = (
@@ -103,7 +102,8 @@ def answer_question(
     top_k: int | None = None,
     history: list[dict] | None = None,
 ) -> GeneratedAnswer:
-    model = getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
+    cfg = get_chat_llm()
+    model = cfg.model
     history = _normalize_history(history or [])
 
     syllabus_hint = _resolve_syllabus_topic(bucket_id, question, history)
@@ -146,17 +146,11 @@ def answer_question(
             retrieval_query=retrieval_query,
         )
 
-    api_key = getattr(settings, "GROQ_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set — required for /api/ask/.")
-
-    # Groq free tier ~12k TPM — keep prompt small or requests hang / 413.
+    # Keep prompt bounded — large contexts can 413 on some providers.
     context_chunks = _fit_context_chunks(chunks)
     history_for_llm = _trim_history_for_llm(history, budget_chars=2500)
 
-    answer_text = _call_groq(
-        api_key=api_key,
-        model=model,
+    answer_text = _call_chat_llm(
         history=history_for_llm,
         chunks=context_chunks,
         syllabus_hint=syllabus_hint,
@@ -253,15 +247,15 @@ def _missing_appendix_message(
     )
 
 
-def _call_groq(
+def _call_chat_llm(
     *,
-    api_key: str,
-    model: str,
     history: list[dict],
     chunks: list[RetrievedChunk],
     syllabus_hint: str | None,
     question: str,
 ) -> str:
+    cfg = get_chat_llm()
+
     def build_messages(use_chunks: list[RetrievedChunk]) -> list[dict]:
         context = "\n\n".join(
             f"[{i}] file={c.document_filename!r} doc_id={c.document_id} "
@@ -281,50 +275,39 @@ def _call_groq(
         messages.append({"role": "user", "content": current_user})
         return messages
 
-    def post(messages: list[dict]):
-        return requests.post(
-            _GROQ_CHAT_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": messages,
-                "temperature": 0.2,
-                "max_tokens": 1000,
-            },
-            timeout=45,
-        )
-
     working = list(chunks)
     messages = build_messages(working)
-    response = post(messages)
+    response = chat_completion_raw(
+        messages, temperature=0.2, max_tokens=1000, timeout=60
+    )
 
     # Oversized / TPM: shrink context and retry once (no long sleep).
     if response.status_code in (413, 429):
         body = (response.text or "").lower()
         if response.status_code == 413 or "request too large" in body or "tpm" in body:
             logger.warning(
-                "Groq request too large (status=%s) — retrying with smaller context",
+                "%s request too large (status=%s) — retrying with smaller context",
+                cfg.provider,
                 response.status_code,
             )
             working = working[: max(2, len(working) // 2)]
             working = _fit_context_chunks(working)
-            # Drop history on retry to free tokens
             messages = build_messages(working)
-            # strip history
             messages = [messages[0], messages[-1]]
-            response = post(messages)
+            response = chat_completion_raw(
+                messages, temperature=0.2, max_tokens=1000, timeout=60
+            )
 
     if response.status_code == 429:
         import time
 
         time.sleep(1.5)
-        response = post(messages)
+        response = chat_completion_raw(
+            messages, temperature=0.2, max_tokens=1000, timeout=60
+        )
 
-    raise_for_llm_response(response, provider="Groq")
-    return response.json()["choices"][0]["message"]["content"].strip()
+    raise_for_llm_response(response, provider=cfg.provider)
+    return extract_message_content(response.json(), provider=cfg.provider)
 
 
 def _normalize_history(raw: list[dict]) -> list[dict]:

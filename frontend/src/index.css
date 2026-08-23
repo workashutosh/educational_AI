@@ -126,3 +126,143 @@
 .font-display {
   font-family: var(--font-display);
 }
+
+/* Chat answers — KaTeX display math.
+   Default KaTeX centers each block in the full bubble width, so short
+   equations look like they have huge left/right padding. Left-align and
+   shrink the block to the formula width when possible.
+   overflow-x:auto would promote overflow-y to auto and spawn vertical
+   scrollbars on macOS — keep y hidden. */
+.math-body .katex-display {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.35rem 0;
+  text-align: left;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-top: 0.1rem;
+  padding-bottom: 0.1rem;
+  scrollbar-width: none;
+}
+.math-body .katex-display:hover {
+  scrollbar-width: thin;
+}
+.math-body .katex-display > .katex {
+  text-align: left;
+}
+.math-body .katex-display::-webkit-scrollbar {
+  height: 0;
+}
+.math-body .katex-display:hover::-webkit-scrollbar {
+  height: 6px;
+}
+.math-body .katex-display::-webkit-scrollbar-thumb {
+  background-color: rgb(0 0 0 / 0.18);
+  border-radius: 9999px;
+}
+.math-body .katex-display::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Active exam — block selecting/copying question text (answers still editable in fields) */
+.exam-secure {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.exam-secure textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Dark auth (login / join / onboard) — DeepSeek-style black form panel */
+.auth-dark label {
+  color: rgb(255 255 255 / 0.65);
+}
+.auth-dark [data-slot="input"],
+.auth-dark select,
+.auth-dark textarea {
+  height: 2.75rem;
+  border-radius: 0.75rem;
+  border-color: rgb(255 255 255 / 0.18);
+  background: transparent;
+  color: #fff;
+}
+.auth-dark [data-slot="input"]::placeholder,
+.auth-dark textarea::placeholder {
+  color: rgb(255 255 255 / 0.35);
+}
+.auth-dark [data-slot="input"]:focus-visible,
+.auth-dark select:focus-visible,
+.auth-dark textarea:focus-visible {
+  border-color: rgb(255 255 255 / 0.45);
+  --tw-ring-color: rgb(255 255 255 / 0.15);
+}
+.auth-dark [data-slot="button"]:not([class*="outline"]):not([class*="ghost"]):not([class*="link"]):not([class*="secondary"]) {
+  border-radius: 9999px;
+  background: #fff;
+  color: #000;
+  height: 2.75rem;
+  font-weight: 600;
+}
+.auth-dark [data-slot="button"]:not([class*="outline"]):not([class*="ghost"]):not([class*="link"]):not([class*="secondary"]):hover {
+  background: rgb(255 255 255 / 0.9);
+}
+.auth-dark [data-slot="button"][class*="outline"] {
+  border-radius: 9999px;
+  border-color: rgb(255 255 255 / 0.25);
+  background: transparent;
+  color: #fff;
+  height: 2.75rem;
+}
+.auth-dark [data-slot="button"][class*="outline"]:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.auth-dark [data-slot="button"][class*="ghost"] {
+  color: rgb(255 255 255 / 0.55);
+}
+.auth-dark [data-slot="button"][class*="ghost"]:hover {
+  background: rgb(255 255 255 / 0.06);
+  color: #fff;
+}
+.auth-dark a {
+  color: rgb(255 255 255 / 0.75);
+}
+.auth-dark a:hover {
+  color: #fff;
+}
+.auth-dark .text-destructive {
+  color: #f87171;
+}
+.auth-dark .text-muted-foreground {
+  color: rgb(255 255 255 / 0.5);
+}
+.auth-dark .text-foreground {
+  color: #fff;
+}
+.auth-dark .border-border,
+.auth-dark .border-border\/80,
+.auth-dark .border-border\/50 {
+  border-color: rgb(255 255 255 / 0.12);
+}
+.auth-dark .bg-white,
+.auth-dark .bg-white\/70,
+.auth-dark .bg-white\/80 {
+  background-color: rgb(255 255 255 / 0.06);
+}
+.auth-dark .bg-muted,
+.auth-dark .bg-muted\/40 {
+  background-color: rgb(255 255 255 / 0.08);
+}
+.auth-dark .bg-brand-soft,
+.auth-dark .bg-brand-soft\/30,
+.auth-dark .bg-brand-soft\/40,
+.auth-dark .bg-brand-soft\/50 {
+  background-color: rgb(0 88 219 / 0.25);
+}
+.auth-dark select option {
+  background: #111;
+  color: #fff;
+}
+

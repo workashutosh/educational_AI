@@ -301,8 +301,8 @@ export function ChatPage() {
           </Button>
         </header>
 
-        <div ref={messagesRef} className="min-h-0 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+        <div ref={messagesRef} className="min-h-0 overflow-y-auto overscroll-contain px-5 py-3 sm:px-6">
+          <div className="flex w-full flex-col gap-3">
             {loadingChat ? (
               <p className="text-sm text-muted-foreground">Loading chat…</p>
             ) : null}
@@ -331,14 +331,17 @@ export function ChatPage() {
             {history.map((m, i) => (
               <div
                 key={i}
-                className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
+                className={cn(
+                  "flex w-full",
+                  m.role === "user" ? "justify-end" : "justify-start",
+                )}
               >
                 <div
                   className={cn(
-                    "max-w-[min(40rem,100%)] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
+                    "rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
                     m.role === "user"
-                      ? "whitespace-pre-wrap bg-[#1e3a5f] text-white"
-                      : "border border-border/80 bg-white text-foreground",
+                      ? "max-w-[min(24rem,50%)] whitespace-pre-wrap bg-[#1e3a5f] text-white"
+                      : "max-w-[min(42rem,70%)] border border-border/80 bg-white text-foreground",
                   )}
                 >
                   {m.role === "assistant" ? (
@@ -366,8 +369,10 @@ export function ChatPage() {
               </div>
             ))}
             {busy ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Thinking…
+              <div className="flex w-full justify-start">
+                <div className="flex max-w-[min(42rem,70%)] items-center gap-2 rounded-2xl border border-border/80 bg-white px-3.5 py-2.5 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" /> Thinking…
+                </div>
               </div>
             ) : null}
             <div ref={bottomRef} className="h-px w-full shrink-0" />
@@ -378,10 +383,7 @@ export function ChatPage() {
           {error ? (
             <p className="px-4 pt-2 text-sm text-destructive sm:px-6">{error}</p>
           ) : null}
-          <form
-            onSubmit={send}
-            className="mx-auto flex w-full max-w-3xl gap-2 px-4 py-3 sm:px-6"
-          >
+          <form onSubmit={send} className="flex w-full gap-2 px-5 py-3 sm:px-6">
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}

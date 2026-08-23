@@ -57,6 +57,17 @@ class School(models.Model):
             return True
         return self.active_member_count() < int(self.max_users)
 
+    def active_manager_count(self) -> int:
+        return self.memberships.filter(
+            is_active=True, role=SchoolMembership.ROLE_MANAGER
+        ).count()
+
+    def can_add_manager(self) -> bool:
+        """False when max_managers is set (>0) and manager seats are full."""
+        if not self.max_managers:
+            return True
+        return self.active_manager_count() < int(self.max_managers)
+
 
 class PendingOnboard(models.Model):
     """Ephemeral school-admin signup awaiting Brevo email OTP verification."""
@@ -283,6 +294,8 @@ class Document(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_QUEUED)
     error_message = models.TextField(blank=True)
+    # Live pipeline hint shown in the UI, e.g. "4/16 pages" or "Embedding 12/40"
+    progress_message = models.CharField(max_length=200, blank=True, default="")
     page_count = models.IntegerField(null=True, blank=True)
     pageindex_tree = models.JSONField(null=True, blank=True)
     duplicate_of = models.ForeignKey(

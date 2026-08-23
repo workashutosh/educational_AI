@@ -36,6 +36,16 @@ urlpatterns = [
     ),
     path("admin/buckets/", views.AdminBucketCreateView.as_view(), name="admin-bucket-create"),
     path("admin/members/", views.AdminMembersListView.as_view(), name="admin-members"),
+    path(
+        "admin/members/create/",
+        views.AdminCreateMemberView.as_view(),
+        name="admin-create-member",
+    ),
+    path(
+        "admin/members/<int:member_id>/access/",
+        views.AdminMemberAccessView.as_view(),
+        name="admin-member-access",
+    ),
     path("admin/students/", views.AdminCreateStudentView.as_view(), name="admin-create-student"),
     path(
         "admin/buckets/<int:pk>/grant/",

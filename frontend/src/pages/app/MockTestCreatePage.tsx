@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { api, type MemberRow } from "@/lib/api"
+import { api, type DocumentRow, type MemberRow, statusLabel } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
@@ -40,8 +40,9 @@ type GeneratedTest = {
   marks_brief?: number
   results_mode?: "immediate" | "after_review"
   source_mode?: SourceMode
+  reference_document_ids?: number[]
   questions: Question[]
-  assignments: { student_id: number; username: string; full_name: string }[]
+  assignments?: { student_id: number; username: string; full_name: string }[]
 }
 
 type Step = 1 | 2 | 3
@@ -67,6 +68,8 @@ export function MockTestCreatePage() {
     "after_review",
   )
   const [sourceMode, setSourceMode] = useState<SourceMode>("notes")
+  const [questionPapers, setQuestionPapers] = useState<DocumentRow[]>([])
+  const [selectedPaperIds, setSelectedPaperIds] = useState<Set<number>>(new Set())
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
@@ -78,6 +81,12 @@ export function MockTestCreatePage() {
   const [assignBusy, setAssignBusy] = useState(false)
 
   const totalQuestions = countMcq + countMulti + countBrief
+  const needsPaperPicker =
+    sourceMode === "question_papers" || sourceMode === "both"
+  const indexedPapers = useMemo(
+    () => questionPapers.filter((d) => d.status === "indexed"),
+    [questionPapers],
+  )
   const blueprintMax = useMemo(
     () => countMcq * marksMcq + countMulti * marksMulti + countBrief * marksBrief,
     [countMcq, countMulti, countBrief, marksMcq, marksMulti, marksBrief],
@@ -90,10 +99,43 @@ export function MockTestCreatePage() {
       .catch(() => setStudents([]))
   }, [session?.can_create_students, session?.can_manage])
 
+  useEffect(() => {
+    if (!bucketId) {
+      setQuestionPapers([])
+      setSelectedPaperIds(new Set())
+      return
+    }
+    void api<DocumentRow[]>(
+      `/api/documents/?bucket_id=${bucketId}&kind=question_paper`,
+    )
+      .then((rows) => {
+        setQuestionPapers(rows)
+        const indexed = rows.filter((d) => d.status === "indexed").map((d) => d.id)
+        setSelectedPaperIds(new Set(indexed))
+      })
+      .catch(() => {
+        setQuestionPapers([])
+        setSelectedPaperIds(new Set())
+      })
+  }, [bucketId])
+
   if (isStudent) return <Navigate to="/app/mock-tests" replace />
 
+  function togglePaper(id: number) {
+    setSelectedPaperIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAllIndexedPapers() {
+    setSelectedPaperIds(new Set(indexedPapers.map((d) => d.id)))
+  }
+
   function blueprintBody() {
-    return {
+    const body: Record<string, unknown> = {
       title: title.trim(),
       topic_prompt: prompt.trim(),
       duration_minutes: duration,
@@ -106,6 +148,10 @@ export function MockTestCreatePage() {
       results_mode: resultsMode,
       source_mode: sourceMode,
     }
+    if (needsPaperPicker) {
+      body.reference_document_ids = [...selectedPaperIds]
+    }
+    return body
   }
 
   function syncFormFromTest(t: GeneratedTest) {
@@ -120,6 +166,9 @@ export function MockTestCreatePage() {
     if (t.marks_brief != null) setMarksBrief(t.marks_brief)
     if (t.results_mode) setResultsMode(t.results_mode)
     if (t.source_mode) setSourceMode(t.source_mode)
+    if (t.reference_document_ids?.length) {
+      setSelectedPaperIds(new Set(t.reference_document_ids))
+    }
   }
 
   async function generate(e: FormEvent) {
@@ -436,6 +485,75 @@ export function MockTestCreatePage() {
                   </label>
                 ))}
               </div>
+              {needsPaperPicker ? (
+                <div className="space-y-2 rounded-xl border border-border/60 px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">Reference question papers</p>
+                    {indexedPapers.length ? (
+                      <button
+                        type="button"
+                        className="text-xs text-brand hover:underline"
+                        onClick={selectAllIndexedPapers}
+                        disabled={busy}
+                      >
+                        Select all ready
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Choose which indexed papers to use for style and difficulty. Upload
+                    papers under AI Bucket → Question papers.
+                  </p>
+                  {!questionPapers.length ? (
+                    <p className="text-sm text-muted-foreground">
+                      No question papers in this bucket yet.
+                    </p>
+                  ) : (
+                    <ul className="max-h-48 space-y-1 overflow-y-auto">
+                      {questionPapers.map((doc) => {
+                        const ready = doc.status === "indexed"
+                        return (
+                          <li key={doc.id}>
+                            <label
+                              className={cn(
+                                "flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm",
+                                !ready && "cursor-not-allowed opacity-60",
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedPaperIds.has(doc.id)}
+                                onChange={() => togglePaper(doc.id)}
+                                disabled={busy || !ready}
+                                className="mt-0.5"
+                              />
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium">
+                                  {doc.original_filename}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {statusLabel(doc.status, doc.progress_message)}
+                                  {doc.page_count ? ` · ${doc.page_count} pages` : ""}
+                                </span>
+                              </span>
+                            </label>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                  {needsPaperPicker && !indexedPapers.length ? (
+                    <p className="text-xs text-destructive">
+                      Upload and wait for at least one paper to finish indexing.
+                    </p>
+                  ) : null}
+                  {needsPaperPicker && indexedPapers.length && !selectedPaperIds.size ? (
+                    <p className="text-xs text-destructive">
+                      Select at least one ready question paper.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="space-y-2 rounded-xl border border-border/60 px-3 py-3">
                 <p className="text-sm font-medium">When students see results</p>
                 <label className="flex cursor-pointer items-start gap-2 text-sm">
@@ -479,7 +597,14 @@ export function MockTestCreatePage() {
               </p>
               <Button
                 type="submit"
-                disabled={busy || !bucketId || !prompt.trim() || totalQuestions < 1}
+                disabled={
+                  busy ||
+                  !bucketId ||
+                  !prompt.trim() ||
+                  totalQuestions < 1 ||
+                  (needsPaperPicker &&
+                    (!indexedPapers.length || selectedPaperIds.size < 1))
+                }
               >
                 {busy ? (
                   <>

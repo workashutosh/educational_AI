@@ -1,5 +1,5 @@
 """
-Generate a downloadable PPTX from bucket notes (RAG + Groq outline + python-pptx).
+Generate a downloadable PPTX from bucket notes (RAG + chat LLM outline + python-pptx).
 """
 from __future__ import annotations
 
@@ -7,22 +7,17 @@ import io
 import json
 import logging
 import re
-import time
 from dataclasses import dataclass
 
-import requests
-from django.conf import settings
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
-from .llm_errors import raise_for_llm_response
+from .llm_provider import chat_completion, get_chat_llm
 from .retrieval_service import search_bucket
 
 logger = logging.getLogger(__name__)
-
-_GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 _SYSTEM_PROMPT = (
     "You create teaching PowerPoint outlines for Class XII students.\n"
@@ -71,24 +66,21 @@ def generate_pptx_outline(
     slide_count: int = 8,
     top_k: int = 12,
 ) -> GeneratedOutline:
-    """RAG + Groq → structured slide outline for preview (no file yet)."""
+    """RAG + chat LLM → structured slide outline for preview (no file yet)."""
     prompt = (prompt or "").strip()
     if not prompt:
         raise PptxGenerationError("Prompt is required.")
     if slide_count < 3 or slide_count > 15:
         raise PptxGenerationError("slide_count must be between 3 and 15.")
 
-    model = getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
+    cfg = get_chat_llm()
+    model = cfg.model
     chunks = search_bucket(bucket_id, query=prompt, top_k=top_k, kinds=["notes"])
     if not chunks:
         raise PptxGenerationError(
             "No matching notes found in this AI Bucket. Index notes first, "
             "or try a more specific topic from your materials."
         )
-
-    api_key = getattr(settings, "GROQ_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set — required for PPT generation.")
 
     context = "\n\n".join(
         f"[{i}] (pages {c.page_start}-{c.page_end}, "
@@ -101,7 +93,7 @@ def generate_pptx_outline(
         f"Create exactly {slide_count} slides."
     )
 
-    outline = _fetch_outline(api_key, model, user_msg, slide_count)
+    outline = _fetch_outline(user_msg, slide_count)
     return GeneratedOutline(
         title=outline["title"],
         slides=outline["slides"],
@@ -137,35 +129,19 @@ def generate_pptx(
     return pptx_from_outline(outline.title, outline.slides)
 
 
-def _fetch_outline(api_key: str, model: str, user_msg: str, slide_count: int) -> dict:
+def _fetch_outline(user_msg: str, slide_count: int) -> dict:
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_msg},
     ]
-    payload = {
-        "model": model,
-        "messages": messages,
-        "temperature": 0.3,
-        "max_tokens": 4096,
-        "response_format": {"type": "json_object"},
-    }
-    response = requests.post(
-        _GROQ_CHAT_URL,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json=payload,
+    raw = chat_completion(
+        messages,
+        temperature=0.3,
+        max_tokens=4096,
+        response_format={"type": "json_object"},
         timeout=90,
+        retries_on_429=1,
     )
-    if response.status_code == 429:
-        time.sleep(2.0)
-        response = requests.post(
-            _GROQ_CHAT_URL,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=90,
-        )
-    raise_for_llm_response(response, provider="Groq")
-
-    raw = response.json()["choices"][0]["message"]["content"].strip()
     data = _parse_outline_json(raw)
     return _normalize_outline(data, slide_count)
 

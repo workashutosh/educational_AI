@@ -32,11 +32,13 @@ def retrieve(
     top_k: int | None = None,
     *,
     kinds: list[str] | None = None,
+    document_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Return global top_k matches across indexed docs in the bucket.
 
     ``kinds`` limits to document kinds (notes / question_paper). None = all.
+    ``document_ids`` further limits to specific documents (e.g. chosen papers).
 
     Each item: {document_id, section_title, page_ref, text, score?}
     """
@@ -45,6 +47,9 @@ def retrieve(
     )
     kind_list = normalize_kinds(kinds)
     docs = list(get_indexed_documents(bucket, kinds=kind_list))
+    if document_ids:
+        allowed = {int(i) for i in document_ids}
+        docs = [d for d in docs if d.id in allowed]
     if not docs:
         return []
 
@@ -58,7 +63,7 @@ def retrieve(
                 exc,
             )
 
-    return _retrieve_via_embeddings(bucket.id, query, k, kinds=kind_list)
+    return _retrieve_via_embeddings(bucket.id, query, k, kinds=kind_list, document_ids=document_ids)
 
 
 def _docs_have_pageindex_text(docs: list[Document]) -> bool:
@@ -137,8 +142,11 @@ def _retrieve_via_embeddings(
     top_k: int,
     *,
     kinds: list[str] | None = None,
+    document_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
-    chunks = search_bucket(bucket_id, query=query, top_k=top_k, kinds=kinds)
+    chunks = search_bucket(
+        bucket_id, query=query, top_k=top_k, kinds=kinds, document_ids=document_ids
+    )
     out: list[dict[str, Any]] = []
     for c in chunks:
         heading = " > ".join(c.heading_path) if c.heading_path else "untitled section"

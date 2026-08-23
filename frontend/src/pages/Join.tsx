@@ -58,11 +58,15 @@ export function JoinPage() {
       title="Join your school"
       subtitle="Ask your admin for the join code. Teachers upload after bucket access is granted."
       footer={
-        <>
-          Need to create a school? <Link className="font-medium text-brand" to="/onboard">School onboarding</Link>
-          {" · "}
-          <Link className="font-medium text-brand" to="/login">Sign in</Link>
-        </>
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+          <Link className="underline underline-offset-2" to="/onboard">
+            Create school
+          </Link>
+          <span className="text-white/30">·</span>
+          <Link className="underline underline-offset-2" to="/login">
+            Sign in
+          </Link>
+        </div>
       }
     >
       <form className="space-y-3.5" onSubmit={onSubmit}>

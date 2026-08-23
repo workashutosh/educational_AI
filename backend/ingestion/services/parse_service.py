@@ -17,14 +17,18 @@ from __future__ import annotations
 import json
 import logging
 import re
+import tempfile
 import time
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[str], None]
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp", ".gif"}
 PDF_EXTS = {".pdf"}
@@ -61,7 +65,11 @@ class ParseResult:
     output_path: Path
 
 
-def parse_document(source_path: str | Path, output_dir: str | Path) -> ParseResult:
+def parse_document(
+    source_path: str | Path,
+    output_dir: str | Path,
+    on_progress: ProgressCallback | None = None,
+) -> ParseResult:
     """
     Parse a PDF/DOCX/PPTX/image/text file into structure-annotated markdown
     and write it to output_dir.
@@ -76,14 +84,22 @@ def parse_document(source_path: str | Path, output_dir: str | Path) -> ParseResu
     ext = source_path.suffix.lower()
 
     if ext in PDF_EXTS:
-        markdown, page_count = _parse_pdf(source_path)
+        markdown, page_count = _parse_pdf(source_path, on_progress=on_progress)
     elif ext in IMAGE_EXTS:
+        if on_progress:
+            on_progress("1/1 pages")
         markdown, page_count = _parse_image(source_path), 1
     elif ext in DOCX_EXTS:
+        if on_progress:
+            on_progress("Reading document…")
         markdown, page_count = _parse_docx(source_path), None
     elif ext in PPTX_EXTS:
+        if on_progress:
+            on_progress("Reading slides…")
         markdown, page_count = _parse_pptx(source_path)
     elif ext in TEXT_EXTS:
+        if on_progress:
+            on_progress("Reading text…")
         markdown, page_count = source_path.read_text(encoding="utf-8", errors="replace"), None
     else:
         raise ValueError(
@@ -383,12 +399,19 @@ def _segments_to_markdown(segments: list[_Segment], heading_levels: dict[float, 
     return "\n\n".join(out)
 
 
-def _parse_pdf(path: Path) -> tuple[str, int]:
+def _parse_pdf(
+    path: Path,
+    on_progress: ProgressCallback | None = None,
+) -> tuple[str, int]:
     import fitz  # PyMuPDF (already required by PageIndex)
 
     doc = fitz.open(path)
     page_count = doc.page_count
-    pages_segments = [_extract_page_segments(page) for page in doc]
+    pages_segments = []
+    for i, page in enumerate(doc, start=1):
+        if on_progress:
+            on_progress(f"{i}/{page_count} pages")
+        pages_segments.append(_extract_page_segments(page))
     doc.close()
 
     total_chars = sum(len(seg.text) for segs in pages_segments for seg in segs)
@@ -400,7 +423,9 @@ def _parse_pdf(path: Path) -> tuple[str, int]:
             path.name,
             avg,
         )
-        ocr_pages = _ocr_via_paddleocr_vl(path)
+        if on_progress:
+            on_progress(f"0/{page_count} pages")
+        ocr_pages = _ocr_via_paddleocr_vl(path, on_progress=on_progress)
         parts = [f"<!--PAGE:{i}-->\n{text}" for i, text in enumerate(ocr_pages, start=1)]
         if len(ocr_pages) != page_count:
             logger.warning(
@@ -493,6 +518,8 @@ def _parse_pptx(path: Path) -> tuple[str, int]:
 _JOB_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
 _POLL_INTERVAL_S = 5
 _JOB_TIMEOUT_S = 600
+_UPLOAD_ATTEMPTS = 3
+_UPLOAD_RETRY_BACKOFF_S = 3
 
 
 def _paddleocr_vl_headers() -> dict:
@@ -504,11 +531,70 @@ def _paddleocr_vl_headers() -> dict:
     return {"Authorization": f"bearer {token}"}
 
 
-def _ocr_via_paddleocr_vl(path: Path) -> list[str]:
+def _ocr_via_paddleocr_vl(
+    path: Path,
+    on_progress: ProgressCallback | None = None,
+) -> list[str]:
     """
     Submit a file (PDF or image) to the PaddleOCR-VL hosted API and return one
     markdown string per extracted page, in order.
+
+    Large multi-page scanned PDFs are rendered page-by-page to PNG and submitted
+    individually — full ~10MB PDF uploads time out on slow links, and single-page
+    PDFs can fail PaddleOCR's splitter (系统错误-拆页).
     """
+    import fitz
+
+    suffix = path.suffix.lower()
+    size = path.stat().st_size
+    if suffix != ".pdf" or size <= 1_500_000:
+        if on_progress:
+            on_progress("OCR…")
+        return _ocr_submit_paddleocr_vl_file(path)
+
+    doc = fitz.open(path)
+    try:
+        page_count = doc.page_count
+        if page_count <= 1:
+            if on_progress:
+                on_progress("1/1 pages")
+            return _ocr_submit_paddleocr_vl_file(path)
+
+        logger.info(
+            "PaddleOCR-VL: OCR %s as %d page images (%d bytes)",
+            path.name,
+            page_count,
+            size,
+        )
+        pages: list[str] = []
+        with tempfile.TemporaryDirectory(prefix="paddleocr_pages_") as tmp:
+            tmp_dir = Path(tmp)
+            # ~144 DPI — sharp enough for exam papers, small enough to upload.
+            matrix = fitz.Matrix(2, 2)
+            for i in range(page_count):
+                if on_progress:
+                    on_progress(f"{i + 1}/{page_count} pages")
+                page_png = tmp_dir / f"page_{i + 1:04d}.png"
+                pix = doc[i].get_pixmap(matrix=matrix)
+                pix.save(page_png)
+                page_texts = _ocr_submit_paddleocr_vl_file(page_png)
+                if page_texts:
+                    pages.append(page_texts[0] if len(page_texts) == 1 else "\n\n".join(page_texts))
+                else:
+                    pages.append("")
+                logger.info(
+                    "PaddleOCR-VL page %d/%d done for %s",
+                    i + 1,
+                    page_count,
+                    path.name,
+                )
+        return pages
+    finally:
+        doc.close()
+
+
+def _ocr_submit_paddleocr_vl_file(path: Path) -> list[str]:
+    """Submit one file (whole PDF or a single-page PDF) and return page markdowns."""
     import requests
 
     model = getattr(settings, "PADDLEOCR_VL_MODEL", "PaddleOCR-VL-1.6")
@@ -518,12 +604,39 @@ def _ocr_via_paddleocr_vl(path: Path) -> list[str]:
         "useChartRecognition": False,
     }
 
-    with open(path, "rb") as f:
-        files = {"file": (path.name, f)}
-        data = {"model": model, "optionalPayload": json.dumps(optional_payload)}
-        response = requests.post(
-            _JOB_URL, headers=_paddleocr_vl_headers(), data=data, files=files, timeout=120
-        )
+    # A single dropped connection would otherwise discard a whole multi-page job.
+    response = None
+    last_exc: Exception | None = None
+    for attempt in range(_UPLOAD_ATTEMPTS):
+        try:
+            with open(path, "rb") as f:
+                files = {"file": (path.name, f)}
+                data = {"model": model, "optionalPayload": json.dumps(optional_payload)}
+                response = requests.post(
+                    _JOB_URL,
+                    headers=_paddleocr_vl_headers(),
+                    data=data,
+                    files=files,
+                    timeout=600,
+                )
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            logger.warning(
+                "PaddleOCR-VL upload failed for %s (attempt %d/%d): %s",
+                path.name,
+                attempt + 1,
+                _UPLOAD_ATTEMPTS,
+                exc,
+            )
+            if attempt + 1 < _UPLOAD_ATTEMPTS:
+                time.sleep(_UPLOAD_RETRY_BACKOFF_S * (attempt + 1))
+
+    if response is None:
+        raise RuntimeError(
+            "Could not reach the OCR service. Check your internet connection "
+            "and try again."
+        ) from last_exc
     if response.status_code != 200:
         raise RuntimeError(
             f"PaddleOCR-VL job submission failed ({response.status_code}): {response.text}"

@@ -39,4 +39,12 @@ def find_indexed_duplicate(bucket_id: int, file_hash: str, exclude_id: int | Non
 def human_error(exc: BaseException, stage: str) -> str:
     """Human-readable error for Document.error_message — never a raw stack trace."""
     detail = str(exc).strip() or exc.__class__.__name__
+    # urllib3/requests failures dump host names, ports and retry internals.
+    if any(
+        marker in detail
+        for marker in ("HTTPSConnectionPool", "HTTPConnectionPool", "Max retries exceeded")
+    ):
+        detail = "could not reach the processing service. Check your connection and retry."
+    elif len(detail) > 300:
+        detail = detail[:297].rstrip() + "…"
     return f"{stage} failed: {detail}"

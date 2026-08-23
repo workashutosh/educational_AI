@@ -216,7 +216,7 @@ function DocsPanel({
     }
     pollRef.current = window.setInterval(() => {
       void load().catch(() => undefined)
-    }, 2500)
+    }, 1500)
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current)
     }
@@ -298,7 +298,7 @@ function DocsPanel({
                     {d.error_message ? ` · ${d.error_message}` : ""}
                   </p>
                 </div>
-                <StatusPill status={d.status} />
+                <StatusPill status={d.status} progressMessage={d.progress_message} />
               </li>
             ))}
           </ul>
@@ -313,7 +313,13 @@ function DocsPanel({
   )
 }
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({
+  status,
+  progressMessage,
+}: {
+  status: string
+  progressMessage?: string | null
+}) {
   const pending = isPendingStatus(status)
   const tone =
     status === "indexed"
@@ -335,7 +341,7 @@ function StatusPill({ status }: { status: string }) {
       )}
     >
       {pending ? <Loader2 className="size-3 animate-spin" /> : null}
-      {statusLabel(status)}
+      {statusLabel(status, progressMessage)}
     </span>
   )
 }
@@ -352,6 +358,7 @@ function AccessPanel({ bucketId }: { bucketId: number }) {
       api<MemberRow[]>("/api/admin/members/"),
       api<AccessGrant[]>(`/api/admin/buckets/${bucketId}/access/`),
     ])
+    // Admins/managers already have full access — grants are for teachers & students.
     setMembers(m.filter((x) => x.role === "teacher" || x.role === "student"))
     setGrants(g)
   }

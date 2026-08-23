@@ -41,14 +41,18 @@ export function LoginPage() {
 
   return (
     <AuthShell
-      title="Sign in"
+      title="Log in"
       subtitle="Teachers, managers, students, and school admins use the same login."
       footer={
-        <>
-          New school? <Link className="font-medium text-brand" to="/onboard">Register &amp; onboard</Link>
-          {" · "}
-          Have a join code? <Link className="font-medium text-brand" to="/join">Join school</Link>
-        </>
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+          <Link className="underline underline-offset-2" to="/onboard">
+            Create school
+          </Link>
+          <span className="text-white/30">·</span>
+          <Link className="underline underline-offset-2" to="/join">
+            Join with code
+          </Link>
+        </div>
       }
     >
       <form className="space-y-4" onSubmit={onSubmit}>
@@ -60,7 +64,7 @@ export function LoginPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
-            placeholder="Credentials from your teacher or admin"
+            placeholder="Phone number / email address"
           />
         </div>
         <div className="space-y-2">
@@ -72,11 +76,12 @@ export function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
+            placeholder="Password"
           />
         </div>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <Button className="w-full" type="submit" disabled={submitting}>
-          {submitting ? "Signing in…" : "Sign in"}
+        <Button className="w-full" size="lg" type="submit" disabled={submitting}>
+          {submitting ? "Signing in…" : "Log in"}
         </Button>
       </form>
     </AuthShell>

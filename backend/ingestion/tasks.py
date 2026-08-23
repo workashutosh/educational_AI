@@ -24,6 +24,11 @@ from .services.indexing_service import index_document
 logger = logging.getLogger(__name__)
 
 
+def _set_progress(document_id: int, message: str) -> None:
+    """Persist a short live status string for the UI (e.g. '4/16 pages')."""
+    Document.objects.filter(pk=document_id).update(progress_message=(message or "")[:200])
+
+
 def process_document_sync(document_id: int) -> dict:
     """
     Synchronous pipeline used by the Celery task and the test_ingestion
@@ -33,6 +38,12 @@ def process_document_sync(document_id: int) -> dict:
         document = Document.objects.select_related("bucket").get(pk=document_id)
     except Document.DoesNotExist:
         return {"ok": False, "error": f"Document {document_id} not found"}
+
+    # Stale broker messages can outlive a deletion — never spend OCR/embedding
+    # budget on a document the user already removed.
+    if document.deleted_at is not None:
+        logger.info("Skipping deleted document %s", document_id)
+        return {"ok": False, "error": "Document was deleted before processing"}
 
     # --- Stage 1: dedup -------------------------------------------------------
     try:
@@ -50,12 +61,16 @@ def process_document_sync(document_id: int) -> dict:
             document.status = Document.STATUS_DUPLICATE
             document.duplicate_of = duplicate
             document.error_message = ""
-            document.save(update_fields=["status", "duplicate_of", "error_message"])
+            document.progress_message = ""
+            document.save(
+                update_fields=["status", "duplicate_of", "error_message", "progress_message"]
+            )
             return {"ok": True, "status": Document.STATUS_DUPLICATE, "duplicate_of": duplicate.pk}
     except Exception as exc:
         document.status = Document.STATUS_FAILED
         document.error_message = human_error(exc, "Deduplication")
-        document.save(update_fields=["status", "error_message"])
+        document.progress_message = ""
+        document.save(update_fields=["status", "error_message", "progress_message"])
         return {"ok": False, "error": document.error_message}
 
     work_dir = Path(settings.MEDIA_ROOT) / "processing" / str(document.pk)
@@ -65,9 +80,14 @@ def process_document_sync(document_id: int) -> dict:
     try:
         document.status = Document.STATUS_PARSING
         document.error_message = ""
-        document.save(update_fields=["status", "error_message"])
+        document.progress_message = "Starting…"
+        document.save(update_fields=["status", "error_message", "progress_message"])
 
-        parse_result = parse_document(file_path, work_dir)
+        parse_result = parse_document(
+            file_path,
+            work_dir,
+            on_progress=lambda msg: _set_progress(document_id, msg),
+        )
         document.page_count = parse_result.page_count
         document.save(update_fields=["page_count"])
         markdown_path = parse_result.output_path
@@ -75,22 +95,35 @@ def process_document_sync(document_id: int) -> dict:
         logger.exception("Parse failed for document %s", document_id)
         document.status = Document.STATUS_FAILED
         document.error_message = human_error(exc, "Parsing")
-        document.save(update_fields=["status", "error_message"])
+        document.progress_message = ""
+        document.save(update_fields=["status", "error_message", "progress_message"])
         _cleanup(work_dir)
         return {"ok": False, "error": document.error_message}
 
     # --- Stage 3: indexing (structure-aware chunking + local embeddings) -----
     try:
         document.status = Document.STATUS_INDEXING
-        document.save(update_fields=["status"])
+        document.progress_message = "Building chunks…"
+        document.save(update_fields=["status", "progress_message"])
 
-        result = index_document(document, markdown_path)
+        result = index_document(
+            document,
+            markdown_path,
+            on_progress=lambda msg: _set_progress(document_id, msg),
+        )
         document.pageindex_tree = result["structure"]
         document.status = Document.STATUS_INDEXED
         document.processed_at = timezone.now()
         document.error_message = ""
+        document.progress_message = ""
         document.save(
-            update_fields=["pageindex_tree", "status", "processed_at", "error_message"]
+            update_fields=[
+                "pageindex_tree",
+                "status",
+                "processed_at",
+                "error_message",
+                "progress_message",
+            ]
         )
         manifest = result.get("manifest") or {}
         logger.info(
@@ -104,7 +137,8 @@ def process_document_sync(document_id: int) -> dict:
         logger.exception("Indexing failed for document %s", document_id)
         document.status = Document.STATUS_FAILED
         document.error_message = human_error(exc, "Indexing")
-        document.save(update_fields=["status", "error_message"])
+        document.progress_message = ""
+        document.save(update_fields=["status", "error_message", "progress_message"])
         _cleanup(work_dir)
         return {"ok": False, "error": document.error_message}
 

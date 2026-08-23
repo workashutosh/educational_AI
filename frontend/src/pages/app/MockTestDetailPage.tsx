@@ -94,6 +94,8 @@ export function MockTestDetailPage() {
   const [test, setTest] = useState<TestDetail | null>(null)
   const [results, setResults] = useState<ResultsPayload | null>(null)
   const [allStudents, setAllStudents] = useState<MemberRow[]>([])
+  const [studentsLoading, setStudentsLoading] = useState(true)
+  const [studentsError, setStudentsError] = useState("")
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -125,9 +127,19 @@ export function MockTestDetailPage() {
   }, [load])
 
   useEffect(() => {
+    setStudentsLoading(true)
+    setStudentsError("")
     void api<MemberRow[]>("/api/admin/members/?role=student")
-      .then(setAllStudents)
-      .catch(() => undefined)
+      .then((rows) => {
+        setAllStudents(rows)
+      })
+      .catch((err) => {
+        setAllStudents([])
+        setStudentsError(
+          err instanceof Error ? err.message : "Could not load student roster",
+        )
+      })
+      .finally(() => setStudentsLoading(false))
   }, [])
 
   if (isStudent) {
@@ -146,10 +158,10 @@ export function MockTestDetailPage() {
     )
   }
 
-  const assignedIds = new Set(test.assignments.map((a) => a.student_id))
+  const assignedIds = new Set((test.assignments || []).map((a) => a.student_id))
   const grantable = allStudents.filter((s) => !assignedIds.has(s.id))
 
-  async function assignSelected() {
+  async function assignSelected(publishAfter = test.status === "draft") {
     if (!selected.size) return
     setBusy(true)
     setError("")
@@ -158,14 +170,15 @@ export function MockTestDetailPage() {
         method: "POST",
         body: JSON.stringify({
           student_ids: [...selected],
-          // Draft tests must be published or students never see them
-          publish: test?.status === "draft",
+          publish: publishAfter,
         }),
       })
       setSelected(new Set())
       await load()
+      if (publishAfter) setTab("results")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Assign failed")
+      setTab("students")
     } finally {
       setBusy(false)
     }
@@ -184,6 +197,11 @@ export function MockTestDetailPage() {
   }
 
   async function publish() {
+    if (test.assigned_count < 1) {
+      setError("Select at least one student on the Students tab before publishing.")
+      setTab("students")
+      return
+    }
     setBusy(true)
     setError("")
     try {
@@ -191,7 +209,9 @@ export function MockTestDetailPage() {
       await load()
       setTab("results")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Publish failed")
+      const msg = err instanceof Error ? err.message : "Publish failed"
+      setError(msg)
+      if (/assign at least one student/i.test(msg)) setTab("students")
     } finally {
       setBusy(false)
     }
@@ -231,7 +251,11 @@ export function MockTestDetailPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           {test.status === "draft" ? (
-            <Button type="button" disabled={busy} onClick={() => void publish()}>
+            <Button
+              type="button"
+              disabled={busy || test.assigned_count < 1}
+              onClick={() => void publish()}
+            >
               Publish
             </Button>
           ) : null}
@@ -249,14 +273,30 @@ export function MockTestDetailPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm">
           <p className="text-amber-900">
             This test is still a <strong>draft</strong>. Students cannot see it until you
-            publish
+            assign them and publish
             {test.assigned_count
               ? ` (${test.assigned_count} student${test.assigned_count === 1 ? "" : "s"} already assigned).`
-              : "."}
+              : " — go to the Students tab to pick who should take it."}
           </p>
-          <Button type="button" size="sm" disabled={busy} onClick={() => void publish()}>
-            Publish now
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setTab("students")}
+            >
+              Assign students
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={busy || test.assigned_count < 1}
+              onClick={() => void publish()}
+            >
+              Publish now
+            </Button>
+          </div>
         </div>
       ) : null}
 
@@ -280,6 +320,11 @@ export function MockTestDetailPage() {
             )}
           >
             {label}
+            {key === "students" &&
+            test.status === "draft" &&
+            test.assigned_count < 1 ? (
+              <span className="ml-1.5 inline-block size-2 rounded-full bg-amber-400" />
+            ) : null}
           </button>
         ))}
       </div>
@@ -325,9 +370,9 @@ export function MockTestDetailPage() {
       {tab === "students" ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <section className="rounded-2xl border border-border/80 bg-white/80 p-4">
-            <h2 className="font-medium">Assigned ({test.assignments.length})</h2>
+            <h2 className="font-medium">Assigned ({test.assignments?.length ?? 0})</h2>
             <ul className="mt-3 space-y-2">
-              {test.assignments.length ? (
+              {test.assignments?.length ? (
                 test.assignments.map((a) => (
                   <li
                     key={a.student_id}
@@ -357,49 +402,90 @@ export function MockTestDetailPage() {
           </section>
           <section className="rounded-2xl border border-border/80 bg-white/80 p-4">
             <h2 className="font-medium">Add students</h2>
-            <ul className="mt-3 max-h-72 space-y-1 overflow-y-auto">
-              {grantable.map((s) => (
-                <li key={s.id}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted/60">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(s.id)}
-                      onChange={() =>
-                        setSelected((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(s.id)) next.delete(s.id)
-                          else next.add(s.id)
-                          return next
-                        })
-                      }
-                    />
-                    {s.full_name || s.username}
-                  </label>
-                </li>
-              ))}
-              {!grantable.length ? (
-                <p className="text-sm text-muted-foreground">All students are already assigned.</p>
-              ) : null}
-            </ul>
-            <Button
-              className="mt-3"
-              type="button"
-              disabled={busy || !selected.size}
-              onClick={() => void assignSelected()}
-            >
-              {busy ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : test.status === "draft" ? (
-                "Assign & publish"
-              ) : (
-                "Assign selected"
-              )}
-            </Button>
-            {test.status === "draft" ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Assigning will also publish so students see the test under My Tests.
-              </p>
-            ) : null}
+            {studentsLoading ? (
+              <p className="mt-3 text-sm text-muted-foreground">Loading student roster…</p>
+            ) : studentsError ? (
+              <p className="mt-3 text-sm text-destructive">{studentsError}</p>
+            ) : !allStudents.length ? (
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p>No student accounts in your school yet.</p>
+                <p>
+                  Create one under{" "}
+                  <Link to="/app/students" className="font-medium text-brand hover:underline">
+                    Students
+                  </Link>{" "}
+                  (teachers) or{" "}
+                  <Link to="/app/members" className="font-medium text-brand hover:underline">
+                    Members
+                  </Link>{" "}
+                  (admins), then come back here to assign.
+                </p>
+              </div>
+            ) : (
+              <>
+                <ul className="mt-3 max-h-72 space-y-1 overflow-y-auto">
+                  {grantable.map((s) => (
+                    <li key={s.id}>
+                      <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-muted/60">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(s.id)}
+                          onChange={() =>
+                            setSelected((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(s.id)) next.delete(s.id)
+                              else next.add(s.id)
+                              return next
+                            })
+                          }
+                          disabled={busy}
+                        />
+                        <span>
+                          {s.full_name || s.username}{" "}
+                          <span className="text-muted-foreground">@{s.username}</span>
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                  {!grantable.length ? (
+                    <p className="text-sm text-muted-foreground">
+                      All students in your school are already assigned to this test.
+                    </p>
+                  ) : null}
+                </ul>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    disabled={busy || !selected.size}
+                    onClick={() => void assignSelected(true)}
+                  >
+                    {busy ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : test.status === "draft" ? (
+                      "Assign & publish"
+                    ) : (
+                      "Assign selected"
+                    )}
+                  </Button>
+                  {test.status === "draft" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy || !selected.size}
+                      onClick={() => void assignSelected(false)}
+                    >
+                      Assign only (keep draft)
+                    </Button>
+                  ) : null}
+                </div>
+                {test.status === "draft" ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    <strong>Assign & publish</strong> is the usual path — students see the
+                    test under My Tests right away.
+                  </p>
+                ) : null}
+              </>
+            )}
           </section>
         </div>
       ) : null}

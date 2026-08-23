@@ -1,7 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
 
 import { AppLayout } from "@/components/app/AppLayout"
-import { StaffOnly } from "@/components/app/RoleGate"
+import { CanCreateStudents, ManagerOrAdmin, StaffOnly } from "@/components/app/RoleGate"
 import { AuthProvider, useAuth } from "@/lib/auth"
 import { BucketDetailPage } from "@/pages/app/BucketDetailPage"
 import { BucketsPage } from "@/pages/app/BucketsPage"
@@ -17,6 +17,7 @@ import { MockTestDetailPage } from "@/pages/app/MockTestDetailPage"
 import { MockTestsPage } from "@/pages/app/MockTestsPage"
 import { MockTestStudentResultPage } from "@/pages/app/MockTestStudentResultPage"
 import { MockTestTakePage } from "@/pages/app/MockTestTakePage"
+import { MembersPage } from "@/pages/app/MembersPage"
 import { StudentsPage } from "@/pages/app/StudentsPage"
 import { JoinPage } from "@/pages/Join"
 import { LandingPage } from "@/pages/Landing"
@@ -97,11 +98,19 @@ export default function App() {
               }
             />
             <Route
+              path="members"
+              element={
+                <ManagerOrAdmin>
+                  <MembersPage />
+                </ManagerOrAdmin>
+              }
+            />
+            <Route
               path="students"
               element={
-                <StaffOnly>
+                <CanCreateStudents>
                   <StudentsPage />
-                </StaffOnly>
+                </CanCreateStudents>
               }
             />
             <Route path="settings" element={<SettingsPage />} />

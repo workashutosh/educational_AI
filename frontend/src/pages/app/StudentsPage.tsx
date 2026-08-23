@@ -73,6 +73,10 @@ export function StudentsPage() {
   if (!session.can_create_students) {
     return <Navigate to="/app" replace />
   }
+  // Admins/managers use the full Members page instead.
+  if (session.can_manage) {
+    return <Navigate to="/app/members" replace />
+  }
 
   const buckets = session.buckets || []
 

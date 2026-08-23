@@ -5,18 +5,15 @@ import json
 import logging
 import re
 
-import requests
-from django.conf import settings
 from django.db import transaction
 
 from engagement.models import MicroQuestion, MicroQuiz, TeacherImpactEvent
 from engagement.services.impact import record_impact
 from engagement.services.notifications import create_notification, notify_many
 from ingestion.models import BucketAccess, Chunk, Document, SchoolMembership
+from ingestion.services.llm_provider import chat_completion
 
 logger = logging.getLogger(__name__)
-
-_GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 def generate_micro_quiz_for_document(document_id: int) -> MicroQuiz | None:
@@ -157,11 +154,6 @@ def _llm_questions(bucket_id: int, title: str) -> list[dict]:
     if not ctx.strip():
         raise RuntimeError("No indexed notes available for micro-quiz")
 
-    api_key = getattr(settings, "GROQ_API_KEY", "") or ""
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY not configured")
-
-    model = getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
     system = (
         "You create short multiple-choice quizzes for school students. "
         "Return ONLY valid JSON: {\"questions\":[{\"prompt\":\"...\",\"options\":"
@@ -169,26 +161,15 @@ def _llm_questions(bucket_id: int, title: str) -> list[dict]:
         "correct_index is 0-3. Use ONLY the provided notes."
     )
     user = f"Quiz context title: {title}\n\nNotes excerpts:\n{ctx}"
-    resp = requests.post(
-        _GROQ_CHAT_URL,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "temperature": 0.3,
-            "max_tokens": 2048,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        },
+    content = chat_completion(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.3,
+        max_tokens=2048,
         timeout=60,
     )
-    if resp.status_code >= 400:
-        raise RuntimeError(f"Groq error {resp.status_code}")
-    content = resp.json()["choices"][0]["message"]["content"]
     data = _parse_json(content)
     questions = data.get("questions") or []
     cleaned = []

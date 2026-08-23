@@ -144,6 +144,31 @@ export function MockTestTakePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remainingMs])
 
+  const takingTest = !loading && !awaitingReview && !review
+
+  useEffect(() => {
+    if (!takingTest) return
+
+    const isAnswerField = (target: EventTarget | null) =>
+      target instanceof HTMLElement && !!target.closest("textarea")
+
+    const blockUnlessAnswerField = (e: Event) => {
+      if (!isAnswerField(e.target)) e.preventDefault()
+    }
+
+    document.addEventListener("copy", blockUnlessAnswerField)
+    document.addEventListener("cut", blockUnlessAnswerField)
+    document.addEventListener("contextmenu", blockUnlessAnswerField)
+    document.addEventListener("selectstart", blockUnlessAnswerField)
+
+    return () => {
+      document.removeEventListener("copy", blockUnlessAnswerField)
+      document.removeEventListener("cut", blockUnlessAnswerField)
+      document.removeEventListener("contextmenu", blockUnlessAnswerField)
+      document.removeEventListener("selectstart", blockUnlessAnswerField)
+    }
+  }, [takingTest])
+
   async function submit(auto = false) {
     if (busy || review) return
     if (!auto && !window.confirm("Submit your answers? You cannot retake this test.")) return
@@ -334,7 +359,18 @@ export function MockTestTakePage() {
     remainingMs != null ? Math.max(0, Math.floor((remainingMs % 60000) / 1000)) : null
 
   return (
-    <div className="w-full space-y-6">
+    <div
+      className="exam-secure w-full space-y-6"
+      onCopy={(e) => {
+        if (!(e.target as HTMLElement).closest("textarea")) e.preventDefault()
+      }}
+      onCut={(e) => {
+        if (!(e.target as HTMLElement).closest("textarea")) e.preventDefault()
+      }}
+      onContextMenu={(e) => {
+        if (!(e.target as HTMLElement).closest("textarea")) e.preventDefault()
+      }}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link
@@ -382,7 +418,7 @@ export function MockTestTakePage() {
                 · {q.marks} mark{q.marks === 1 ? "" : "s"}
               </span>
             </p>
-            <p className="mt-1 text-sm whitespace-pre-wrap">{q.prompt}</p>
+            <p className="mt-1 select-none text-sm whitespace-pre-wrap">{q.prompt}</p>
 
             {q.qtype === "brief" ? (
               <textarea
@@ -421,7 +457,7 @@ export function MockTestTakePage() {
                           }}
                           className="mt-0.5"
                         />
-                        <span>
+                        <span className="select-none">
                           {String.fromCharCode(65 + i)}. {opt}
                         </span>
                       </label>
@@ -444,7 +480,7 @@ export function MockTestTakePage() {
                         }
                         className="mt-0.5"
                       />
-                      <span>
+                      <span className="select-none">
                         {String.fromCharCode(65 + i)}. {opt}
                       </span>
                     </label>

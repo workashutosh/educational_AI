@@ -8,6 +8,7 @@ markers, then local embeddings for retrieval.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,16 @@ from .embedding_service import embed_texts, model_name
 
 logger = logging.getLogger(__name__)
 
+ProgressCallback = Callable[[str], None]
 
-def index_document(document: Document, markdown_path: str | Path) -> dict[str, Any]:
+
+def index_document(
+    document: Document,
+    markdown_path: str | Path,
+    on_progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    if on_progress:
+        on_progress("Building chunks…")
     markdown = Path(markdown_path).read_text(encoding="utf-8")
     spans = chunk_markdown(
         markdown,
@@ -32,8 +41,23 @@ def index_document(document: Document, markdown_path: str | Path) -> dict[str, A
     if not spans:
         raise ValueError("Chunker produced no chunks for this document")
 
-    embeddings = embed_texts([span.text for span in spans])
+    total = len(spans)
+    if on_progress:
+        on_progress(f"0/{total} chunks")
+
+    # Embed in small batches so the UI can show progressive chunk counts.
+    batch_size = 8
+    embeddings: list[list[float]] = []
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        if on_progress:
+            on_progress(f"{end}/{total} chunks")
+        embeddings.extend(embed_texts([span.text for span in spans[start:end]]))
+
     embedding_model = model_name()
+
+    if on_progress:
+        on_progress(f"Saving {total} chunks…")
 
     # Atomic replace — never leave a document with deleted-but-not-recreated chunks
     with transaction.atomic():

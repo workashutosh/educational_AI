@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react"
 
-import { getToken } from "@/lib/api"
 import type { AskSource } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -46,7 +45,7 @@ function formatAnswerHtml(text: string) {
     .replace(/^# (.+)$/gm, "<h3 class='mt-2 font-semibold'>$1</h3>")
     .replace(/^[-*] (.+)$/gm, "<li class='ml-4 list-disc'>$1</li>")
     .replace(/\[(\d+)\]/g, '<span class="font-semibold text-brand">[$1]</span>')
-    .replace(/\n{2,}/g, "<br/><br/>")
+    .replace(/\n{2,}/g, "<br/>")
     .replace(/\n/g, "<br/>")
   html = html.replace(/\u0000MATH(\d+)\u0000/g, (_, i) => chunks[Number(i)])
   return html
@@ -76,53 +75,6 @@ function typesetMath(el: HTMLElement) {
   attempt(0)
 }
 
-function AuthPageImage({
-  url,
-  label,
-}: {
-  url: string
-  label: string
-}) {
-  const imgRef = useRef<HTMLImageElement>(null)
-
-  useEffect(() => {
-    let revoked: string | null = null
-    let cancelled = false
-    ;(async () => {
-      try {
-        const token = getToken()
-        const res = await fetch(url, {
-          headers: token ? { Authorization: `Token ${token}` } : {},
-        })
-        if (!res.ok || cancelled) return
-        const blob = await res.blob()
-        const obj = URL.createObjectURL(blob)
-        revoked = obj
-        if (imgRef.current) imgRef.current.src = obj
-      } catch {
-        /* ignore */
-      }
-    })()
-    return () => {
-      cancelled = true
-      if (revoked) URL.revokeObjectURL(revoked)
-    }
-  }, [url])
-
-  return (
-    <figure className="overflow-hidden rounded-xl border border-border/70 bg-[#f7f9fd]">
-      <img
-        ref={imgRef}
-        alt={label}
-        className="max-h-72 w-full object-contain bg-white"
-      />
-      <figcaption className="truncate px-2 py-1 text-[11px] text-muted-foreground">
-        {label}
-      </figcaption>
-    </figure>
-  )
-}
-
 export function RichAnswer({
   content,
   sources,
@@ -141,40 +93,12 @@ export function RichAnswer({
     typesetMath(el)
   }, [content])
 
-  const images = (sources || []).filter(
-    (s) => s.image_url && s.document_id && s.page_start,
-  )
-  // de-dupe by document+page
-  const seen = new Set<string>()
-  const uniqueImages = images.filter((s) => {
-    const key = `${s.document_id}:${s.page_start}`
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn("space-y-2", className)}>
       <div
         ref={ref}
-        className="text-sm leading-relaxed [&_.katex-display]:my-3 [&_.katex-display]:overflow-x-auto [&_code]:text-[0.85em]"
+        className="math-body text-sm leading-normal [&_code]:text-[0.85em]"
       />
-      {uniqueImages.length ? (
-        <div className="space-y-2 border-t border-border/50 pt-2">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            From your notes
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {uniqueImages.slice(0, 4).map((s) => (
-              <AuthPageImage
-                key={`${s.document_id}-${s.page_start}`}
-                url={s.image_url!}
-                label={`${s.document_filename || "Note"}${s.page_ref ? ` · ${s.page_ref}` : ""}`}
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
       {sources?.length ? (
         <div className="flex flex-wrap gap-1.5 border-t border-border/50 pt-2">
           {sources.slice(0, 6).map((s, j) => (

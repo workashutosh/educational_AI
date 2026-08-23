@@ -22,6 +22,12 @@ class GenerateMockTestSerializer(serializers.Serializer):
         required=False,
         default="notes",
     )
+    reference_document_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
+        default=list,
+    )
 
     # Back-compat: old clients sending question_count → treat as all MCQ
     question_count = serializers.IntegerField(required=False, min_value=1, max_value=40)
@@ -62,6 +68,11 @@ class MockTestUpdateSerializer(serializers.Serializer):
     source_mode = serializers.ChoiceField(
         choices=["notes", "question_papers", "both"],
         required=False,
+    )
+    reference_document_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        allow_empty=True,
     )
 
     def validate(self, attrs):

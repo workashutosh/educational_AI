@@ -29,6 +29,7 @@ class DocumentSerializer(serializers.ModelSerializer):
             "kind",
             "status",
             "error_message",
+            "progress_message",
             "page_count",
             "duplicate_of",
             "created_at",
@@ -50,7 +51,7 @@ class DocumentUploadSerializer(serializers.Serializer):
 class DocumentStatusSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
-        fields = ("id", "status", "error_message", "duplicate_of")
+        fields = ("id", "status", "error_message", "progress_message", "duplicate_of")
         read_only_fields = fields
 
 
@@ -127,6 +128,47 @@ class CreateStudentSerializer(serializers.Serializer):
 
     def validate_username(self, value):
         return (value or "").strip()
+
+
+class CreateMemberSerializer(serializers.Serializer):
+    """Provision any school role (permissions enforced in the view)."""
+
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(min_length=8, max_length=128, write_only=True)
+    full_name = serializers.CharField(required=False, allow_blank=True, max_length=150, default="")
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
+    role = serializers.ChoiceField(
+        choices=["admin", "manager", "teacher", "student"],
+        default="student",
+    )
+    bucket_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_empty=True,
+        default=list,
+        help_text="Buckets to grant (teachers/students). Ignored for admin/manager.",
+    )
+    # Back-compat with student create form
+    bucket_id = serializers.IntegerField(required=False, allow_null=True)
+
+    def validate_username(self, value):
+        return (value or "").strip()
+
+    def validate(self, attrs):
+        ids = list(attrs.get("bucket_ids") or [])
+        single = attrs.get("bucket_id")
+        if single is not None and single not in ids:
+            ids.append(int(single))
+        attrs["bucket_ids"] = ids
+        return attrs
+
+
+class MemberAccessSerializer(serializers.Serializer):
+    bucket_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True,
+        allow_empty=True,
+    )
 
 
 class BucketAccessSerializer(serializers.ModelSerializer):

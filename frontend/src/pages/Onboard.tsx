@@ -6,21 +6,15 @@ import {
   type SetStateAction,
 } from "react"
 import { Link, Navigate, useNavigate } from "react-router-dom"
-import {
-  BookOpen,
-  CheckCircle2,
-  ShieldCheck,
-  Sparkles,
-  Users,
-} from "lucide-react"
+import { CheckCircle2 } from "lucide-react"
 
-import { BrandLogo } from "@/components/BrandLogo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { api, type Session } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
+import { AuthShell } from "@/pages/AuthShell"
 
 type Step = 1 | 2 | 3
 
@@ -193,245 +187,169 @@ export function OnboardPage() {
   }[step]
 
   return (
-    <div className="flex min-h-svh w-full flex-col bg-white lg:flex-row">
-      {/* Left info panel — UI reference: Azure free-account onboarding */}
-      <aside className="relative flex w-full flex-col justify-between overflow-hidden border-b border-border/60 px-6 py-8 sm:px-10 lg:w-[42%] lg:border-b-0 lg:border-r lg:px-12 lg:py-12">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_20%_0%,#d6e4f9_0%,transparent_55%),linear-gradient(165deg,#eef3fb_0%,#f7f9fd_45%,#e8f0fc_100%)]"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-16 top-24 size-64 rounded-full bg-brand/8 blur-3xl"
-        />
-        <div className="relative z-[1]">
-          <BrandLogo size={36} wordmarkClassName="text-lg tracking-tight text-foreground" />
-          <h1 className="mt-10 font-display text-3xl leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.65rem]">
-            Create your school account
-          </h1>
-          <p className="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Set up your organization in a few steps. Upload notes, chat with AI, run mock tests,
-            and teach with Teams — grounded in what you actually teach.
-          </p>
-          <ul className="mt-8 space-y-4">
-            {(
-              [
-                [BookOpen, "AI Buckets for each subject"],
-                [Sparkles, "Chat & PPT from your own notes"],
-                [Users, "Teachers, managers, and students"],
-                [ShieldCheck, "School-scoped data — your notes stay yours"],
-              ] as const
-            ).map(([Icon, text]) => (
-              <li key={text} className="flex items-start gap-3 text-sm text-foreground/90">
-                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-white/80 text-brand shadow-sm ring-1 ring-brand/15">
-                  <Icon className="size-4" />
-                </span>
-                <span className="pt-1.5 leading-snug">{text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <p className="relative z-[1] mt-10 hidden text-xs text-muted-foreground lg:block">
-          Already have an account?{" "}
-          <Link to="/login" className="font-medium text-brand hover:underline">
+    <AuthShell
+      wide
+      title={stepMeta.title}
+      subtitle={stepMeta.hint}
+      heroTitle="Create your school account"
+      heroSubtitle="Set up your organization in a few steps. Upload notes, chat with AI, run mock tests, and teach with Teams — grounded in what you actually teach."
+      footer={
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+          <Link className="underline underline-offset-2" to="/login">
             Sign in
           </Link>
-        </p>
-      </aside>
-
-      {/* Right form panel */}
-      <section className="flex w-full flex-1 flex-col lg:w-[58%]">
-        <header className="flex items-center justify-end gap-4 border-b border-border/50 px-5 py-3 sm:px-10">
-          <Link
-            to="/join"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
+          <span className="text-white/30">·</span>
+          <Link className="underline underline-offset-2" to="/join">
             Join with code
           </Link>
-          <Link
-            to="/login"
-            className="text-sm font-medium text-brand hover:underline"
-          >
-            Sign in
-          </Link>
-        </header>
-
-        <div className="flex flex-1 flex-col px-5 py-8 sm:px-10 lg:px-14 lg:py-12">
-          <div className="mx-auto w-full max-w-lg flex-1">
-            <p className="text-sm font-medium text-muted-foreground">
-              Step {step} of 3
-            </p>
-            <div className="mt-2 flex gap-1.5">
-              {[1, 2, 3].map((n) => (
-                <div
-                  key={n}
-                  className={cn(
-                    "h-1 flex-1 rounded-full transition-colors",
-                    n <= step ? "bg-brand" : "bg-border",
-                  )}
-                />
-              ))}
-            </div>
-
-            <h2 className="mt-8 text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
-              {stepMeta.title}
-            </h2>
-            <p className="mt-1.5 text-sm text-muted-foreground">{stepMeta.hint}</p>
-
-            <div className="mt-8">
-              {step === 1 ? (
-                <form className="space-y-4" onSubmit={startOnboard}>
-                  <Field
-                    label="University / organization name"
-                    id="organization_name"
-                    value={form.organization_name}
-                    onChange={setField}
-                    required
-                  />
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field
-                      label="Country / region"
-                      id="country_region"
-                      value={form.country_region}
-                      onChange={setField}
-                      placeholder="e.g. India"
-                      required
-                    />
-                    <Field
-                      label="Contact phone"
-                      id="contact_phone"
-                      value={form.contact_phone}
-                      onChange={setField}
-                      placeholder="Phone number"
-                      required
-                    />
-                  </div>
-                  <Field
-                    label="Email address"
-                    id="email"
-                    type="email"
-                    value={form.email}
-                    onChange={setField}
-                    autoComplete="email"
-                    required
-                  />
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <Field
-                      label="Password"
-                      id="password"
-                      type="password"
-                      value={form.password}
-                      onChange={setField}
-                      autoComplete="new-password"
-                      required
-                    />
-                    <Field
-                      label="Confirm password"
-                      id="password_confirm"
-                      type="password"
-                      value={form.password_confirm}
-                      onChange={setField}
-                      autoComplete="new-password"
-                      required
-                    />
-                  </div>
-                  <label className="flex items-start gap-2.5 text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      className="mt-1 size-4 rounded border-input accent-brand"
-                      checked={form.privacy_consent}
-                      onChange={(e) => setField("privacy_consent", e.target.checked)}
-                      required
-                    />
-                    <span>
-                      I agree to the data privacy policy and consent to processing of my
-                      information for this school account.
-                    </span>
-                  </label>
-                  {error ? <p className="text-sm text-destructive">{error}</p> : null}
-                  <Button className="mt-2 w-full sm:w-auto sm:min-w-[10rem]" type="submit" disabled={submitting}>
-                    {submitting ? "Sending code…" : "Next"}
-                  </Button>
-                </form>
-              ) : null}
-
-              {step === 2 ? (
-                <form className="space-y-4" onSubmit={verifyOtp}>
-                  <div className="rounded-xl border border-brand-soft-border bg-brand-soft/50 px-3 py-2.5 text-sm text-brand">
-                    <span className="inline-flex items-center gap-1.5">
-                      <CheckCircle2 className="size-4" />
-                      Code sent to {maskedEmail}
-                    </span>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="otp">Verification code</Label>
-                    <Input
-                      id="otp"
-                      inputMode="numeric"
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                      value={otp}
-                      onChange={(e) =>
-                        setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
-                      }
-                      placeholder="••••••"
-                      className="h-12 text-center text-lg tracking-[0.35em]"
-                      required
-                    />
-                  </div>
-                  {error ? <p className="text-sm text-destructive">{error}</p> : null}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="submit"
-                      disabled={submitting || otp.length !== 6}
-                      className="min-w-[8rem]"
-                    >
-                      {submitting ? "Verifying…" : "Verify"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={submitting || resendAfter > 0}
-                      onClick={() => void resendOtp()}
-                    >
-                      {resendAfter > 0 ? `Resend in ${resendAfter}s` : "Resend code"}
-                    </Button>
-                    <Button type="button" variant="ghost" onClick={() => setStep(1)}>
-                      Back
-                    </Button>
-                  </div>
-                </form>
-              ) : null}
-
-              {step === 3 ? (
-                <BucketPlanStep
-                  plan={plan}
-                  setPlan={setPlan}
-                  error={error}
-                  submitting={submitting}
-                  onContinue={() => void completeOnboard(false)}
-                  onSkip={() => void completeOnboard(true)}
-                  onBack={() => setStep(2)}
-                />
-              ) : null}
-            </div>
-          </div>
-
-          <footer className="mx-auto mt-10 flex w-full max-w-lg flex-wrap items-center gap-x-4 gap-y-2 border-t border-border/50 pt-6 text-xs text-muted-foreground">
-            <Link to="/" className="hover:text-foreground">
-              Home
-            </Link>
-            <Link to="/login" className="hover:text-foreground">
-              Sign in
-            </Link>
-            <Link to="/join" className="hover:text-foreground">
-              Join school
-            </Link>
-            <span className="ml-auto">© ClassKit</span>
-          </footer>
         </div>
-      </section>
-    </div>
+      }
+    >
+      <div className="-mt-2 mb-6">
+        <p className="text-sm font-medium text-white/50">Step {step} of 3</p>
+        <div className="mt-2 flex gap-1.5">
+          {[1, 2, 3].map((n) => (
+            <div
+              key={n}
+              className={cn(
+                "h-1 flex-1 rounded-full transition-colors",
+                n <= step ? "bg-white" : "bg-white/15",
+              )}
+            />
+          ))}
+        </div>
+      </div>
+
+      {step === 1 ? (
+        <form className="space-y-4" onSubmit={startOnboard}>
+          <Field
+            label="University / organization name"
+            id="organization_name"
+            value={form.organization_name}
+            onChange={setField}
+            required
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Country / region"
+              id="country_region"
+              value={form.country_region}
+              onChange={setField}
+              placeholder="e.g. India"
+              required
+            />
+            <Field
+              label="Contact phone"
+              id="contact_phone"
+              value={form.contact_phone}
+              onChange={setField}
+              placeholder="Phone number"
+              required
+            />
+          </div>
+          <Field
+            label="Email address"
+            id="email"
+            type="email"
+            value={form.email}
+            onChange={setField}
+            autoComplete="email"
+            required
+          />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Password"
+              id="password"
+              type="password"
+              value={form.password}
+              onChange={setField}
+              autoComplete="new-password"
+              required
+            />
+            <Field
+              label="Confirm password"
+              id="password_confirm"
+              type="password"
+              value={form.password_confirm}
+              onChange={setField}
+              autoComplete="new-password"
+              required
+            />
+          </div>
+          <label className="flex items-start gap-2.5 text-sm text-white/55">
+            <input
+              type="checkbox"
+              className="mt-1 size-4 rounded border-white/30 bg-transparent accent-white"
+              checked={form.privacy_consent}
+              onChange={(e) => setField("privacy_consent", e.target.checked)}
+              required
+            />
+            <span>
+              I agree to the data privacy policy and consent to processing of my information
+              for this school account.
+            </span>
+          </label>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <Button className="w-full" size="lg" type="submit" disabled={submitting}>
+            {submitting ? "Sending code…" : "Next"}
+          </Button>
+        </form>
+      ) : null}
+
+      {step === 2 ? (
+        <form className="space-y-4" onSubmit={verifyOtp}>
+          <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm text-white/80">
+            <span className="inline-flex items-center gap-1.5">
+              <CheckCircle2 className="size-4 text-white" />
+              Code sent to {maskedEmail}
+            </span>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="otp">Verification code</Label>
+            <Input
+              id="otp"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="••••••"
+              className="h-12 text-center text-lg tracking-[0.35em]"
+              required
+            />
+          </div>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting || otp.length !== 6} className="min-w-[8rem]">
+              {submitting ? "Verifying…" : "Verify"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting || resendAfter > 0}
+              onClick={() => void resendOtp()}
+            >
+              {resendAfter > 0 ? `Resend in ${resendAfter}s` : "Resend code"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setStep(1)}>
+              Back
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
+      {step === 3 ? (
+        <BucketPlanStep
+          plan={plan}
+          setPlan={setPlan}
+          error={error}
+          submitting={submitting}
+          onContinue={() => void completeOnboard(false)}
+          onSkip={() => void completeOnboard(true)}
+          onBack={() => setStep(2)}
+        />
+      ) : null}
+    </AuthShell>
   )
 }
 
@@ -516,8 +434,8 @@ function BucketPlanStep({
                 onClick={() => setPlan((p) => ({ ...p, max_buckets: n }))}
                 className={`group relative flex flex-col items-center rounded-xl border px-2 py-3 transition ${
                   active
-                    ? "border-brand bg-brand-soft shadow-sm"
-                    : "border-border/80 bg-white/70 hover:border-brand/40"
+                    ? "border-white/40 bg-white/10 shadow-sm"
+                    : "border-white/15 bg-transparent hover:border-white/30"
                 }`}
                 aria-pressed={active}
                 aria-label={`${n} AI Bucket${n === 1 ? "" : "s"}`}
@@ -525,7 +443,7 @@ function BucketPlanStep({
                 <BucketIcon filled={active} fillRatio={plan.bucket_quota_gb / 5} />
                 <span
                   className={`mt-1.5 text-xs font-medium ${
-                    active ? "text-brand" : "text-muted-foreground"
+                    active ? "text-white" : "text-white/45"
                   }`}
                 >
                   AI Bucket {n}
@@ -537,10 +455,10 @@ function BucketPlanStep({
             type="button"
             disabled
             title="Paid upgrade coming soon"
-            className="flex flex-col items-center rounded-xl border border-dashed border-border/90 bg-muted/40 px-2 py-3 opacity-70"
+            className="flex flex-col items-center rounded-xl border border-dashed border-white/20 bg-white/5 px-2 py-3 opacity-70"
           >
             <BucketIcon filled={false} dashed />
-            <span className="mt-1.5 text-xs font-medium text-muted-foreground">+ Paid</span>
+            <span className="mt-1.5 text-xs font-medium text-white/45">+ Paid</span>
           </button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
@@ -560,8 +478,8 @@ function BucketPlanStep({
                 onClick={() => setPlan((p) => ({ ...p, bucket_quota_gb: gb }))}
                 className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
                   active
-                    ? "bg-brand text-white"
-                    : "border border-border bg-white text-muted-foreground hover:border-brand/50"
+                    ? "bg-white text-black"
+                    : "border border-white/20 bg-transparent text-white/55 hover:border-white/40"
                 }`}
               >
                 {gb} GB
@@ -571,14 +489,14 @@ function BucketPlanStep({
           <button
             type="button"
             disabled
-            className="cursor-not-allowed rounded-full border border-dashed border-border px-3.5 py-1.5 text-sm text-muted-foreground opacity-60"
+            className="cursor-not-allowed rounded-full border border-dashed border-white/20 px-3.5 py-1.5 text-sm text-white/40 opacity-60"
           >
             More (Paid)
           </button>
         </div>
       </div>
 
-      <div className="space-y-2.5 rounded-xl border border-border/80 bg-white/70 p-3">
+      <div className="space-y-2.5 rounded-xl border border-white/15 bg-white/5 p-3">
         <p className="text-sm font-medium text-foreground">Seats</p>
         <SeatStepper
           label="Users"
@@ -633,17 +551,19 @@ function SeatStepper({
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none hover:bg-muted disabled:opacity-40"
+          className="flex size-8 items-center justify-center rounded-lg border border-white/20 bg-transparent text-lg leading-none text-white hover:bg-white/10 disabled:opacity-40"
           onClick={() => onChange(Math.max(0, value - 1))}
           disabled={value <= 0}
           aria-label={`Decrease ${label}`}
         >
           −
         </button>
-        <span className="w-8 text-center text-sm font-semibold tabular-nums">{value}</span>
+        <span className="w-8 text-center text-sm font-semibold tabular-nums text-white">
+          {value}
+        </span>
         <button
           type="button"
-          className="flex size-8 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none hover:bg-muted disabled:opacity-40"
+          className="flex size-8 items-center justify-center rounded-lg border border-white/20 bg-transparent text-lg leading-none text-white hover:bg-white/10 disabled:opacity-40"
           onClick={() => onChange(Math.min(max, value + 1))}
           disabled={value >= max}
           aria-label={`Increase ${label}`}
@@ -665,8 +585,8 @@ function BucketIcon({
   dashed?: boolean
 }) {
   const fillH = Math.max(0.15, Math.min(0.85, fillRatio))
-  const stroke = filled ? "var(--brand)" : dashed ? "#94a3b8" : "#8a9aab"
-  const liquid = filled ? "var(--brand)" : "#cbd5e1"
+  const stroke = filled ? "#ffffff" : dashed ? "#64748b" : "#94a3b8"
+  const liquid = filled ? "#60a5fa" : "#475569"
 
   return (
     <svg viewBox="0 0 64 72" className="h-14 w-12" aria-hidden>
