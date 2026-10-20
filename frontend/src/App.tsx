@@ -19,6 +19,17 @@ import { MockTestStudentResultPage } from "@/pages/app/MockTestStudentResultPage
 import { MockTestTakePage } from "@/pages/app/MockTestTakePage"
 import { MembersPage } from "@/pages/app/MembersPage"
 import { StudentsPage } from "@/pages/app/StudentsPage"
+import { BillingPage } from "@/pages/app/BillingPage"
+import { DoubtsPage } from "@/pages/app/DoubtsPage"
+import { FlashcardStudyPage, FlashcardsPage } from "@/pages/app/FlashcardsPage"
+import { HomeworkDetailPage } from "@/pages/app/HomeworkDetailPage"
+import { HomeworkPage } from "@/pages/app/HomeworkPage"
+import { InsightsPage } from "@/pages/app/InsightsPage"
+import { PaperDetailPage } from "@/pages/app/PaperDetailPage"
+import { PapersPage } from "@/pages/app/PapersPage"
+import { ParentsPage } from "@/pages/app/ParentsPage"
+import { QuestionBankPage } from "@/pages/app/QuestionBankPage"
+import { ParentHomePage } from "@/pages/parent/ParentHomePage"
 import { JoinPage } from "@/pages/Join"
 import { LandingPage } from "@/pages/Landing"
 import { LoginPage } from "@/pages/Login"
@@ -34,9 +45,23 @@ function ProtectedShell() {
     )
   }
   if (!session?.membership) {
-    return <Navigate to="/login" replace />
+    return <Navigate to={session?.account_type === "parent" ? "/parent" : "/login"} replace />
   }
   return <AppLayout />
+}
+
+function ParentShell() {
+  const { session, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="flex min-h-svh items-center justify-center text-muted-foreground">
+        Loading…
+      </div>
+    )
+  }
+  if (session?.membership) return <Navigate to="/app" replace />
+  if (session?.account_type !== "parent") return <Navigate to="/login" replace />
+  return <ParentHomePage />
 }
 
 export default function App() {
@@ -48,6 +73,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/onboard" element={<OnboardPage />} />
           <Route path="/join" element={<JoinPage />} />
+          <Route path="/parent" element={<ParentShell />} />
           <Route path="/app" element={<ProtectedShell />}>
             <Route index element={<DashboardPage />} />
             <Route
@@ -114,6 +140,52 @@ export default function App() {
               }
             />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="insights" element={<InsightsPage />} />
+            <Route path="doubts" element={<DoubtsPage />} />
+            <Route path="flashcards" element={<FlashcardsPage />} />
+            <Route path="flashcards/study" element={<FlashcardStudyPage />} />
+            <Route path="homework" element={<HomeworkPage />} />
+            <Route path="homework/:homeworkId" element={<HomeworkDetailPage />} />
+            <Route
+              path="question-bank"
+              element={
+                <StaffOnly>
+                  <QuestionBankPage />
+                </StaffOnly>
+              }
+            />
+            <Route
+              path="papers"
+              element={
+                <StaffOnly>
+                  <PapersPage />
+                </StaffOnly>
+              }
+            />
+            <Route
+              path="papers/:paperId"
+              element={
+                <StaffOnly>
+                  <PaperDetailPage />
+                </StaffOnly>
+              }
+            />
+            <Route
+              path="parents"
+              element={
+                <CanCreateStudents>
+                  <ParentsPage />
+                </CanCreateStudents>
+              }
+            />
+            <Route
+              path="billing"
+              element={
+                <ManagerOrAdmin>
+                  <BillingPage />
+                </ManagerOrAdmin>
+              }
+            />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

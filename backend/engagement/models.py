@@ -29,11 +29,15 @@ class EngagementActivity(models.Model):
     KIND_MICRO_QUIZ = "micro_quiz"
     KIND_MOCK_SUBMIT = "mock_submit"
     KIND_LECTURE_JOIN = "lecture_join"
+    KIND_FLASHCARD = "flashcard"
+    KIND_HOMEWORK = "homework_submit"
     KIND_CHOICES = [
         (KIND_ASK, "Ask"),
         (KIND_MICRO_QUIZ, "Micro quiz"),
         (KIND_MOCK_SUBMIT, "Mock submit"),
         (KIND_LECTURE_JOIN, "Lecture join"),
+        (KIND_FLASHCARD, "Flashcard review"),
+        (KIND_HOMEWORK, "Homework submit"),
     ]
 
     school = models.ForeignKey(
@@ -126,6 +130,13 @@ class MicroQuestion(models.Model):
     prompt = models.TextField()
     options = models.JSONField(default=list)  # list[str] length 4
     correct_index = models.PositiveSmallIntegerField(default=0)
+    topic = models.ForeignKey(
+        "question_bank.Topic",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="micro_questions",
+    )
 
     class Meta:
         ordering = ["order", "id"]
@@ -294,3 +305,18 @@ class LeaderboardSetting(models.Model):
         blank=True,
         related_name="+",
     )
+
+
+class DeviceToken(models.Model):
+    """Push token registered by a mobile/web client (FCM/APNs). Sending is not wired yet."""
+
+    PLATFORM_CHOICES = [("android", "Android"), ("ios", "iOS"), ("web", "Web")]
+
+    user = models.ForeignKey(
+        "auth.User", on_delete=models.CASCADE, related_name="device_tokens"
+    )
+    token = models.CharField(max_length=512, unique=True)
+    platform = models.CharField(max_length=16, choices=PLATFORM_CHOICES)
+    app_version = models.CharField(max_length=32, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)

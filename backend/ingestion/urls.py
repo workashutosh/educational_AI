@@ -12,6 +12,11 @@ urlpatterns = [
     path("auth/onboard/complete/", auth_api.OnboardCompleteView.as_view(), name="auth-onboard-complete"),
     path("auth/me/", auth_api.AuthMeView.as_view(), name="auth-me"),
     path("auth/logout/", auth_api.AuthLogoutView.as_view(), name="auth-logout"),
+    path(
+        "auth/password/change/",
+        auth_api.AuthChangePasswordView.as_view(),
+        name="auth-password-change",
+    ),
     path("buckets/", views.BucketListView.as_view(), name="bucket-list"),
     path("documents/", views.DocumentListCreateView.as_view(), name="document-list-create"),
     path("documents/<int:pk>/status/", views.DocumentStatusView.as_view(), name="document-status"),
@@ -22,6 +27,9 @@ urlpatterns = [
     ),
     path("query/", views.QueryView.as_view(), name="query"),
     path("ask/", views.AskView.as_view(), name="ask"),
+    path("languages/", views.LanguageListView.as_view(), name="languages"),
+    path("translate/", views.TranslateView.as_view(), name="translate"),
+    path("speech/transcribe/", views.SpeechTranscribeView.as_view(), name="speech-transcribe"),
     path("generate-pptx/", views.GeneratePptxView.as_view(), name="generate-pptx"),
     path(
         "generate-pptx/download/",

@@ -4,6 +4,7 @@ from __future__ import annotations
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -436,3 +437,37 @@ def _leaderboard_rows(test: MockTest, *, reveal_names: bool) -> list[dict]:
             }
         )
     return rows
+
+
+class DeviceTokenView(APIView):
+    """
+    POST /api/engagement/devices/ {token, platform: android|ios|web, app_version?}
+    DELETE /api/engagement/devices/ {token} — call on sign-out.
+    Works for school members and parent accounts.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from engagement.models import DeviceToken
+
+        token = str(request.data.get("token") or "").strip()
+        platform = str(request.data.get("platform") or "").strip().lower()
+        if not token or platform not in {"android", "ios", "web"}:
+            return Response({"detail": "token and platform (android|ios|web) are required."}, status=400)
+        device, _ = DeviceToken.objects.update_or_create(
+            token=token[:512],
+            defaults={
+                "user": request.user,
+                "platform": platform,
+                "app_version": str(request.data.get("app_version") or "")[:32],
+            },
+        )
+        return Response({"id": device.id, "platform": device.platform}, status=status.HTTP_201_CREATED)
+
+    def delete(self, request):
+        from engagement.models import DeviceToken
+
+        token = str(request.data.get("token") or request.query_params.get("token") or "").strip()
+        DeviceToken.objects.filter(user=request.user, token=token).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

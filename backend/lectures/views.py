@@ -5,10 +5,12 @@ import logging
 
 from django.conf import settings
 from django.db.models import Q
-from django.http import HttpResponseRedirect
+from django.http import FileResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,7 +18,7 @@ from rest_framework.views import APIView
 from ingestion.models import Document, SchoolMembership, SubjectBucket
 from ingestion.permissions import IsSchoolMember, get_membership
 
-from .models import Lecture
+from .models import Lecture, LectureRecording
 from .serializers import CreateLectureSerializer, UpdateLectureSerializer
 from .services import (
     TeamsGraphError,
@@ -329,6 +331,15 @@ class LectureRoomView(APIView):
             return Response({"detail": "Forbidden"}, status=403)
 
         data = _lecture_payload(lecture, member)
+        data["attendance"] = None
+        try:
+            from school_ops.services import record_join
+
+            record = record_join(lecture, member)
+            if record is not None:
+                data["attendance"] = {"status": record.status, "first_seen_at": record.first_seen_at}
+        except Exception:
+            logger.exception("attendance auto-mark failed lecture=%s", lecture.pk)
         data["notes"] = _room_notes(lecture.bucket)
         data["ai"] = {
             "bucket_id": lecture.bucket_id,
@@ -363,6 +374,12 @@ class LectureEndView(APIView):
         if not _can_manage(member, lecture):
             return Response({"detail": "Forbidden"}, status=403)
         lecture.mark_ended()
+        try:
+            from school_ops.services import finalize_lecture
+
+            finalize_lecture(lecture)
+        except Exception:
+            logger.exception("attendance finalize failed lecture=%s", lecture.pk)
         try:
             from engagement.tasks import on_lecture_ended
 
@@ -404,3 +421,138 @@ class LectureCreateTeamsView(APIView):
             ]
         )
         return Response(_lecture_payload(lecture, member))
+
+
+# ---------------------------------------------------------------------------
+# Recordings → transcript → notes
+# ---------------------------------------------------------------------------
+
+
+def _recording_payload(rec: LectureRecording, *, full: bool = False) -> dict:
+    data = {
+        "id": rec.id,
+        "lecture_id": rec.lecture_id,
+        "original_filename": rec.original_filename,
+        "byte_size": rec.byte_size,
+        "language": rec.language,
+        "status": rec.status,
+        "status_display": rec.get_status_display(),
+        "error_message": rec.error_message,
+        "duration_seconds": rec.duration_seconds,
+        "summary": rec.summary,
+        "key_points": rec.key_points,
+        "document_id": rec.document_id,
+        "audio_url": f"/api/lectures/recordings/{rec.id}/audio/",
+        "created_at": rec.created_at,
+        "finished_at": rec.finished_at,
+    }
+    if full:
+        data["transcript"] = rec.transcript
+        data["segments"] = rec.segments
+    return data
+
+
+class LectureRecordingListCreateView(APIView):
+    """
+    GET  /api/lectures/<pk>/recordings/ — recordings with summaries.
+    POST /api/lectures/<pk>/recordings/ (multipart: file, language?) — upload audio;
+    transcription + indexing runs in the background (poll the recording).
+    """
+
+    permission_classes = [IsSchoolMember]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request, pk):
+        member = _member(request)
+        lecture = get_object_or_404(Lecture.objects.select_related("bucket"), pk=pk)
+        if not _can_view(member, lecture):
+            return Response({"detail": "Forbidden"}, status=403)
+        return Response([_recording_payload(r) for r in lecture.recordings.all()])
+
+    def post(self, request, pk):
+        from pathlib import Path
+
+        from ingestion.services.language_service import normalize_language
+        from ingestion.services.speech_service import AUDIO_EXTS, is_configured
+
+        from .recordings import process_recording, process_recording_task
+
+        member = _member(request)
+        lecture = get_object_or_404(Lecture.objects.select_related("bucket"), pk=pk)
+        if not _can_manage(member, lecture):
+            return Response({"detail": "Forbidden"}, status=403)
+        if not is_configured():
+            return Response({"detail": "Lecture transcription is not set up yet."}, status=503)
+        upload = request.FILES.get("file") or request.FILES.get("audio")
+        if upload is None:
+            return Response({"detail": "Attach the recording as 'file'."}, status=400)
+        if Path(upload.name).suffix.lower() not in AUDIO_EXTS:
+            return Response(
+                {"detail": "Upload an audio/video file (MP3, M4A, WAV, WEBM, OGG, MP4)."},
+                status=400,
+            )
+        max_bytes = int(getattr(settings, "LECTURE_RECORDING_MAX_BYTES", 500 * 1024 * 1024))
+        if upload.size > max_bytes:
+            return Response(
+                {"detail": f"Recording must be under {max_bytes // (1024 * 1024)} MB."},
+                status=400,
+            )
+        language = request.data.get("language") or ""
+        rec = LectureRecording.objects.create(
+            lecture=lecture,
+            uploaded_by=member,
+            file=upload,
+            original_filename=upload.name[:500],
+            byte_size=upload.size,
+            language=normalize_language(language) if language else "",
+        )
+        try:
+            process_recording_task.delay(rec.id)
+        except Exception:
+            logger.warning("Celery unavailable; processing recording inline id=%s", rec.id)
+            process_recording(rec.id)
+            rec.refresh_from_db()
+        return Response(_recording_payload(rec), status=status.HTTP_202_ACCEPTED)
+
+
+def _recording_for(request, rec_id: int) -> tuple[SchoolMembership, LectureRecording]:
+    member = _member(request)
+    rec = get_object_or_404(
+        LectureRecording.objects.select_related("lecture__bucket"), pk=rec_id
+    )
+    if not _can_view(member, rec.lecture):
+        raise PermissionDenied("Forbidden")
+    return member, rec
+
+
+class LectureRecordingDetailView(APIView):
+    """GET full transcript + segments; DELETE (lecture managers)."""
+
+    permission_classes = [IsSchoolMember]
+
+    def get(self, request, rec_id):
+        _, rec = _recording_for(request, rec_id)
+        return Response(_recording_payload(rec, full=True))
+
+    def delete(self, request, rec_id):
+        member, rec = _recording_for(request, rec_id)
+        if not _can_manage(member, rec.lecture):
+            return Response({"detail": "Forbidden"}, status=403)
+        if rec.document_id:
+            Document.objects.filter(pk=rec.document_id).update(deleted_at=timezone.now())
+        rec.file.delete(save=False)
+        rec.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LectureRecordingAudioView(APIView):
+    """GET — stream the original audio to anyone who can view the lecture."""
+
+    permission_classes = [IsSchoolMember]
+
+    def get(self, request, rec_id):
+        import mimetypes
+
+        _, rec = _recording_for(request, rec_id)
+        ctype = mimetypes.guess_type(rec.file.name)[0] or "application/octet-stream"
+        return FileResponse(rec.file.open("rb"), content_type=ctype)

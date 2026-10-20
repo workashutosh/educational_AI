@@ -84,6 +84,7 @@ def _generate(*, bucket, source_type: str, source_id: int, title: str, created_b
                 prompt=str(q["prompt"])[:2000],
                 options=[str(o)[:400] for o in q["options"][:4]],
                 correct_index=int(q["correct_index"]),
+                topic=_topic_for(bucket, str(q["prompt"])),
             )
         quiz.status = MicroQuiz.STATUS_READY
         quiz.error_message = ""
@@ -107,6 +108,17 @@ def _generate(*, bucket, source_type: str, source_id: int, title: str, created_b
 
     _notify_students(quiz)
     return quiz
+
+
+def _topic_for(bucket, prompt: str):
+    """Embedding-based topic tag (no LLM) so quick checks feed weak-topic analytics."""
+    try:
+        from question_bank.services.tagging import suggest_topic
+
+        return suggest_topic(bucket, prompt)
+    except Exception:
+        logger.debug("micro question tagging skipped", exc_info=True)
+        return None
 
 
 def _notify_students(quiz: MicroQuiz) -> None:

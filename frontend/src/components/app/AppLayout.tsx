@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 import {
+  BarChart3,
+  BookCheck,
   BookOpen,
   ClipboardList,
+  CreditCard,
+  Database,
+  FileText,
+  HelpCircle,
+  Layers,
+  UsersRound,
   GraduationCap,
   LayoutDashboard,
   LogOut,
@@ -73,6 +81,42 @@ const nav: NavItem[] = [
     icon: ClipboardList,
   },
   {
+    to: "/app/homework",
+    end: false,
+    label: "Homework",
+    studentLabel: "My Homework",
+    icon: BookCheck,
+  },
+  { to: "/app/flashcards", end: false, label: "Flashcards", icon: Layers },
+  {
+    to: "/app/doubts",
+    end: false,
+    label: "Doubts",
+    studentLabel: "My Doubts",
+    icon: HelpCircle,
+  },
+  {
+    to: "/app/insights",
+    end: false,
+    label: "Insights",
+    studentLabel: "My Progress",
+    icon: BarChart3,
+  },
+  {
+    to: "/app/question-bank",
+    end: false,
+    label: "Question Bank",
+    icon: Database,
+    roles: ["admin", "manager", "teacher"],
+  },
+  {
+    to: "/app/papers",
+    end: false,
+    label: "Question Papers",
+    icon: FileText,
+    roles: ["admin", "manager", "teacher"],
+  },
+  {
     to: "/app/members",
     end: false,
     label: "Members",
@@ -85,6 +129,20 @@ const nav: NavItem[] = [
     label: "Students",
     icon: GraduationCap,
     roles: ["teacher"],
+  },
+  {
+    to: "/app/parents",
+    end: false,
+    label: "Parents",
+    icon: UsersRound,
+    roles: ["admin", "manager", "teacher"],
+  },
+  {
+    to: "/app/billing",
+    end: false,
+    label: "Billing & Usage",
+    icon: CreditCard,
+    roles: ["admin", "manager"],
   },
   { to: "/app/settings", end: false, label: "Settings", icon: Settings2 },
 ]
@@ -162,7 +220,7 @@ export function AppLayout() {
           </div>
         </div>
 
-        <nav className="flex flex-1 flex-col gap-0.5">
+        <nav className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
           {items.map((item) => (
             <NavLink
               key={item.to}

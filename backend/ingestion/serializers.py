@@ -72,6 +72,8 @@ class AskRequestSerializer(serializers.Serializer):
     top_k = serializers.IntegerField(required=False, default=5, min_value=1, max_value=50)
     history = ChatHistoryItemSerializer(many=True, required=False, default=list)
     session_id = serializers.IntegerField(required=False, allow_null=True)
+    # ISO code (hi, ta, …) or name; answers come back in that language.
+    language = serializers.CharField(required=False, allow_blank=True, default="", max_length=20)
 
 
 class GeneratePptxRequestSerializer(serializers.Serializer):
@@ -259,3 +261,8 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             enriched.append(row)
         data["sources"] = enriched
         return data
+
+
+class TranslateRequestSerializer(serializers.Serializer):
+    text = serializers.CharField(max_length=6000)
+    target_language = serializers.CharField(max_length=20)

@@ -155,7 +155,20 @@ def process_document_sync(document_id: int) -> dict:
 @shared_task(bind=True, name="ingestion.process_document", max_retries=0)
 def process_document(self, document_id: int) -> dict:
     """Celery entrypoint — must not block the upload request."""
-    return process_document_sync(document_id)
+    from billing.services.usage import usage_scope
+
+    row = (
+        Document.objects.filter(pk=document_id)
+        .values("bucket__school_id", "uploaded_by_id")
+        .first()
+        or {}
+    )
+    with usage_scope(
+        school_id=row.get("bucket__school_id"),
+        member_id=row.get("uploaded_by_id"),
+        feature="ingestion",
+    ):
+        return process_document_sync(document_id)
 
 
 def _cleanup(work_dir: Path) -> None:

@@ -18,6 +18,7 @@ from django.db import transaction
 from ..models import Chunk, Document
 from .chunk_service import DEFAULT_MAX_CHARS, DEFAULT_OVERLAP_CHARS, chunk_markdown
 from .embedding_service import embed_texts, model_name
+from .vector_store import write_vectors
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def index_document(
     # Atomic replace — never leave a document with deleted-but-not-recreated chunks
     with transaction.atomic():
         deleted_n = Chunk.objects.filter(document=document).delete()[0]
-        Chunk.objects.bulk_create(
+        created = Chunk.objects.bulk_create(
             [
                 Chunk(
                     document=document,
@@ -80,6 +81,8 @@ def index_document(
                 for i, (span, embedding) in enumerate(zip(spans, embeddings))
             ]
         )
+        # Mirror into the pgvector ANN column when the extension is installed.
+        write_vectors([(c.pk, c.embedding) for c in created if c.pk])
 
     page_nums = sorted(
         {

@@ -20,6 +20,7 @@ urlpatterns = [
         name="engagement-notification-read",
     ),
     path("preferences/", views.PreferenceView.as_view(), name="engagement-preferences"),
+    path("devices/", views.DeviceTokenView.as_view(), name="engagement-devices"),
     path(
         "micro-quizzes/",
         views.MicroQuizListView.as_view(),

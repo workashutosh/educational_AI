@@ -38,8 +38,11 @@ def on_document_indexed(document_id: int) -> dict:
     )
 
     quiz = None
+    from billing.services.usage import usage_scope
+
     try:
-        quiz = generate_micro_quiz_for_document(document_id)
+        with usage_scope(school_id=doc.bucket.school_id, feature="micro_quiz"):
+            quiz = generate_micro_quiz_for_document(document_id)
     except Exception:
         logger.exception("micro quiz after index failed doc=%s", document_id)
 
@@ -79,8 +82,11 @@ def on_lecture_ended(lecture_id: int) -> dict:
     )
 
     quiz = None
+    from billing.services.usage import usage_scope
+
     try:
-        quiz = generate_micro_quiz_for_lecture(lecture_id)
+        with usage_scope(school_id=lec.school_id, feature="micro_quiz"):
+            quiz = generate_micro_quiz_for_lecture(lecture_id)
     except Exception:
         logger.exception("micro quiz after lecture failed id=%s", lecture_id)
 

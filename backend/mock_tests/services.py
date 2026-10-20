@@ -663,6 +663,20 @@ def _call_llm_json(
             raise HarnessLLMError(f"Chat LLM error: {exc}") from exc
 
 
+def _meter_litellm(model: str, resp) -> None:
+    try:
+        from billing.services.usage import record_llm_usage
+
+        usage = getattr(resp, "usage", None)
+        record_llm_usage(
+            provider="LiteLLM",
+            model=model,
+            usage=usage.model_dump() if hasattr(usage, "model_dump") else dict(usage or {}),
+        )
+    except Exception:
+        logger.debug("litellm metering skipped", exc_info=True)
+
+
 def _litellm(messages: list[dict], model: str, max_tokens: int = 4096) -> str:
     try:
         from litellm import completion
@@ -676,6 +690,7 @@ def _litellm(messages: list[dict], model: str, max_tokens: int = 4096) -> str:
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
         )
+        _meter_litellm(model, resp)
         return resp.choices[0].message.content.strip()
     except Exception:
         try:
@@ -685,6 +700,7 @@ def _litellm(messages: list[dict], model: str, max_tokens: int = 4096) -> str:
                 temperature=0.3,
                 max_tokens=max_tokens,
             )
+            _meter_litellm(model, resp)
             return resp.choices[0].message.content.strip()
         except Exception as exc2:
             raise HarnessLLMError(f"LiteLLM error: {exc2}") from exc2

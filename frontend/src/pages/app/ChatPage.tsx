@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Loader2, MessageSquarePlus, SendHorizontal } from "lucide-react"
 
+import { AnswerFeedback } from "@/components/chat/AnswerFeedback"
 import { RichAnswer } from "@/components/chat/RichAnswer"
+import { VoiceInput } from "@/components/chat/VoiceInput"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api, type AskSource, type ChatMessage, type ChatSession } from "@/lib/api"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
+
+const LANG_KEY = "education_ai_chat_lang"
 
 export function ChatPage() {
   const { session } = useAuth()
@@ -28,6 +32,37 @@ export function ChatPage() {
   const [error, setError] = useState("")
   const bottomRef = useRef<HTMLDivElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
+  const [language, setLanguage] = useState(() => {
+    try {
+      return localStorage.getItem(LANG_KEY) || "en"
+    } catch {
+      return "en"
+    }
+  })
+  const [languages, setLanguages] = useState<{ code: string; name: string }[]>([])
+
+  useEffect(() => {
+    api<{ code: string; name: string }[]>("/api/languages/").then(setLanguages).catch(() => setLanguages([]))
+  }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANG_KEY, language)
+    } catch {
+      /* ignore */
+    }
+  }, [language])
+
+  // ?q= prefill (e.g. "Ask AI" from the progress page)
+  useEffect(() => {
+    const q = searchParams.get("q")
+    if (q) {
+      setInput(q)
+      const params = new URLSearchParams(searchParams)
+      params.delete("q")
+      setSearchParams(params, { replace: true })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const setQuery = useCallback(
     (next: { bucket?: number | null; session?: number | null }) => {
@@ -107,6 +142,7 @@ export function ChatPage() {
             role: m.role,
             content: m.content,
             sources: m.sources,
+            message_id: m.role === "assistant" ? m.id : null,
           })),
         )
         if (detail.bucket && detail.bucket !== bucketId) {
@@ -155,12 +191,15 @@ export function ChatPage() {
         sources: AskSource[]
         suggestions?: string[]
         session?: { id: number; title: string }
+        message_id?: number | null
+        doubt_id?: number | null
       }>("/api/ask/", {
         method: "POST",
         body: JSON.stringify({
           query: q,
           bucket_id: bucketId,
           session_id: sid,
+          language,
           history: nextHistory.slice(0, -1).map((m) => ({
             role: m.role,
             content: m.content,
@@ -176,6 +215,8 @@ export function ChatPage() {
           content: res.answer,
           sources: res.sources || [],
           suggestions: res.suggestions || [],
+          message_id: res.message_id,
+          doubt_id: res.doubt_id,
         },
       ])
       // Sync URL after messages are on screen + persisted
@@ -296,9 +337,25 @@ export function ChatPage() {
                 : "Grounded answers from indexed notes"}
             </p>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={newChat}>
-            New chat
-          </Button>
+          <div className="flex items-center gap-2">
+            {languages.length ? (
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                title="Answer language"
+                className="rounded-lg border border-input bg-transparent px-2 py-1.5 text-xs outline-none focus-visible:border-ring"
+              >
+                {languages.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <Button type="button" variant="outline" size="sm" onClick={newChat}>
+              New chat
+            </Button>
+          </div>
         </header>
 
         <div ref={messagesRef} className="min-h-0 overflow-y-auto overscroll-contain px-5 py-3 sm:px-6">
@@ -347,6 +404,13 @@ export function ChatPage() {
                   {m.role === "assistant" ? (
                     <>
                       <RichAnswer content={m.content} sources={m.sources} />
+                      {m.doubt_id ? (
+                        <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                          This isn't in the notes yet, so we've sent your question to your teacher.
+                          You'll get a notification when they answer.
+                        </p>
+                      ) : null}
+                      <AnswerFeedback messageId={m.message_id} doubtId={m.doubt_id} isStudent={isStudent} />
                       {m.suggestions?.length && i === history.length - 1 ? (
                         <div className="mt-3 flex flex-wrap gap-2 border-t border-border/60 pt-3">
                           {m.suggestions.map((s) => (
@@ -390,6 +454,11 @@ export function ChatPage() {
               placeholder="Ask a question…"
               disabled={busy || !bucketId}
               className="h-11"
+            />
+            <VoiceInput
+              language={language}
+              disabled={busy || !bucketId}
+              onText={(text) => setInput((prev) => (prev ? `${prev} ${text}` : text))}
             />
             <Button
               type="submit"

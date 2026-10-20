@@ -8,11 +8,11 @@ import {
   Video,
 } from "lucide-react"
 
+import { LectureAttendance, LectureRecordings } from "@/components/app/LectureExtras"
 import { RichAnswer } from "@/components/chat/RichAnswer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api, formatBytes, type AskSource } from "@/lib/api"
-import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
 type NoteRow = {
@@ -49,7 +49,6 @@ type Msg = {
 export function LectureRoomPage() {
   const { lectureId } = useParams()
   const id = Number(lectureId)
-  const { session } = useAuth()
   const [room, setRoom] = useState<Room | null>(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(true)
@@ -407,6 +406,9 @@ export function LectureRoomPage() {
           </form>
         </section>
       </div>
+
+      <LectureRecordings lectureId={room.id} canManage={room.can_manage} />
+      {room.can_manage ? <LectureAttendance lectureId={room.id} /> : null}
     </div>
   )
 }

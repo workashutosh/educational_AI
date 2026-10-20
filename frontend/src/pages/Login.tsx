@@ -31,7 +31,7 @@ export function LoginPage() {
         token: null,
       })
       setSession(data)
-      navigate("/app")
+      navigate(data.account_type === "parent" && !data.membership ? "/parent" : "/app")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed")
     } finally {

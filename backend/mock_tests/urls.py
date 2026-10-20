@@ -39,7 +39,7 @@ urlpatterns = [
     ),
     path(
         "<int:pk>/results/<int:student_id>/release/",
-        views.MockTestReleaseResultsView.as_view(),
+        views.MockTestReleaseStudentResultsView.as_view(),
         name="mock-test-release-student",
     ),
     path(

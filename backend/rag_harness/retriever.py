@@ -153,6 +153,7 @@ def _retrieve_via_embeddings(
         page_ref = _page_ref(c.page_start, c.page_end)
         out.append(
             {
+                "chunk_id": c.chunk_id,
                 "document_id": c.document_id,
                 "section_title": heading,
                 "page_ref": page_ref,

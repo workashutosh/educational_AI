@@ -43,6 +43,12 @@ INSTALLED_APPS = [
     "mock_tests",
     "lectures",
     "engagement",
+    "question_bank",
+    "learning",
+    "homework",
+    "analytics",
+    "school_ops",
+    "billing",
 ]
 
 MIDDLEWARE = [
@@ -52,6 +58,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "billing.middleware.UsageScopeMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -107,14 +114,16 @@ MEDIA_ROOT = BASE_DIR / env("MEDIA_ROOT", default="media")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
+    # Token first so a missing/expired token is a 401 (with WWW-Authenticate),
+    # which mobile clients use as the "sign in again" signal.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_SCHEMA_CLASS": "config.schema.ClassKitAutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
 }
@@ -255,3 +264,89 @@ MS_GRAPH_REDIRECT_URI = env(
 )
 # organizations = any work/school tenant; or set to your tenant id for single-tenant apps
 MS_GRAPH_OAUTH_TENANT = env("MS_GRAPH_OAUTH_TENANT", default="organizations")
+
+# ---------------------------------------------------------------------------
+# Retrieval vector backend — auto uses pgvector when ingestion 0007 could
+# create the `embedding_vec` column; json = always brute-force numpy.
+# EMBEDDING_DIM must match EMBEDDING_MODEL (bge-small / multilingual MiniLM = 384).
+# Set EMBEDDING_MULTILINGUAL=True after switching to a multilingual model so
+# non-English questions are embedded directly (no translation step).
+# ---------------------------------------------------------------------------
+RAG_VECTOR_BACKEND = env("RAG_VECTOR_BACKEND", default="auto")
+EMBEDDING_DIM = env.int("EMBEDDING_DIM", default=384)
+EMBEDDING_MULTILINGUAL = env.bool("EMBEDDING_MULTILINGUAL", default=False)
+
+# ---------------------------------------------------------------------------
+# Speech-to-text (voice questions + lecture recordings). OpenAI-compatible
+# Whisper endpoint; defaults to Groq with GROQ_API_KEY.
+# ---------------------------------------------------------------------------
+TRANSCRIPTION_API_URL = env("TRANSCRIPTION_API_URL", default="")
+TRANSCRIPTION_API_KEY = env("TRANSCRIPTION_API_KEY", default="")
+TRANSCRIPTION_MODEL = env("TRANSCRIPTION_MODEL", default="whisper-large-v3-turbo")
+TRANSCRIPTION_MAX_UPLOAD_BYTES = env.int("TRANSCRIPTION_MAX_UPLOAD_BYTES", default=25 * 1024 * 1024)
+LECTURE_RECORDING_MAX_BYTES = env.int("LECTURE_RECORDING_MAX_BYTES", default=500 * 1024 * 1024)
+
+# ---------------------------------------------------------------------------
+# Billing (Razorpay Orders + Checkout) and usage metering
+# ---------------------------------------------------------------------------
+RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
+RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET", default="")
+RAZORPAY_WEBHOOK_SECRET = env("RAZORPAY_WEBHOOK_SECRET", default="")
+BILLING_PRICE_STANDARD_PAISE = env.int("BILLING_PRICE_STANDARD_PAISE", default=299_900)
+BILLING_PRICE_PRO_PAISE = env.int("BILLING_PRICE_PRO_PAISE", default=799_900)
+# Block LLM calls once a school exceeds its plan's monthly token allowance.
+BILLING_ENFORCE_AI_QUOTA = env.bool("BILLING_ENFORCE_AI_QUOTA", default=True)
+# Cost estimates only (USD). {model: [input_per_1M_tokens, output_per_1M_tokens]}
+LLM_PRICING_USD_PER_MTOK = env.json(
+    "LLM_PRICING_USD_PER_MTOK",
+    default={
+        "deepseek-v4-flash": [0.27, 1.10],
+        "llama-3.3-70b-versatile": [0.59, 0.79],
+        "gemini/gemini-2.5-flash": [0.30, 2.50],
+        "default": [0.50, 1.50],
+    },
+)
+OCR_COST_USD_PER_PAGE = env.float("OCR_COST_USD_PER_PAGE", default=0.0015)
+TRANSCRIPTION_COST_USD_PER_MINUTE = env.float("TRANSCRIPTION_COST_USD_PER_MINUTE", default=0.0007)
+
+CELERY_BEAT_SCHEDULE.update(
+    {
+        "billing-expire-subscriptions": {
+            "task": "billing.expire_subscriptions",
+            "schedule": timedelta(hours=6),
+        },
+        "school-ops-parent-weekly-digest": {
+            "task": "school_ops.send_parent_weekly_digests",
+            "schedule": timedelta(days=7),
+        },
+    }
+)
+
+# Uniform API errors: every 4xx/5xx carries `detail` (+ `errors` for field issues).
+REST_FRAMEWORK["EXCEPTION_HANDLER"] = "config.api.exception_handler"
+SPECTACULAR_SETTINGS.update(
+    {
+        "TITLE": "ClassKit API",
+        "DESCRIPTION": (
+            "School-scoped notes → RAG chat, mock tests, question bank & papers, homework, "
+            "flashcards, doubts, lectures (recordings, attendance), analytics, parent portal, "
+            "billing. Authenticate with `Authorization: Token <key>` from /api/auth/login/. "
+            "All routes are also served under /api/v1/ for mobile clients."
+        ),
+        "VERSION": "1.0.0",
+        "COMPONENT_SPLIT_REQUEST": True,
+        "SCHEMA_PATH_PREFIX": r"/api/",
+        "PREPROCESSING_HOOKS": ["config.api.drop_versioned_duplicates"],
+        "ENUM_NAME_OVERRIDES": {
+            "BankQuestionTypeEnum": "question_bank.models.QuestionItem.TYPE_CHOICES",
+            "DifficultyEnum": "question_bank.models.QuestionItem.DIFFICULTY_CHOICES",
+            "DeckVisibilityEnum": "learning.models.FlashcardDeck.VISIBILITY_CHOICES",
+        },
+    }
+)
+
+# Tests run Celery tasks inline (no broker needed); external calls are mocked.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    CELERY_TASK_ALWAYS_EAGER = True
+    CELERY_TASK_EAGER_PROPAGATES = False
+    BILLING_ENFORCE_AI_QUOTA = True

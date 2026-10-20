@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 
 import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
@@ -10,7 +11,9 @@ type Prefs = {
 }
 
 export function SettingsPage() {
-  const { session, logout } = useAuth()
+  const { session, logout, setSession } = useAuth()
+  const [pw, setPw] = useState({ old_password: "", new_password: "" })
+  const [pwMsg, setPwMsg] = useState("")
   const [prefs, setPrefs] = useState<Prefs | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -42,6 +45,21 @@ export function SettingsPage() {
       /* keep optimistic */
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function changePassword() {
+    setPwMsg("")
+    try {
+      const next = await api<typeof session>("/api/auth/password/change/", {
+        method: "POST",
+        body: JSON.stringify(pw),
+      })
+      if (next) setSession(next)
+      setPw({ old_password: "", new_password: "" })
+      setPwMsg("Password changed. Other devices were signed out.")
+    } catch (err) {
+      setPwMsg(err instanceof Error ? err.message : "Could not change password")
     }
   }
 
@@ -122,6 +140,35 @@ export function SettingsPage() {
           value={school.max_users ? String(school.max_users) : "Unlimited"}
         />
         <Row label="Manager seats" value={String(school.max_managers ?? 0)} />
+        {can_manage ? (
+          <Link to="/app/billing" className="inline-block text-sm font-medium text-brand hover:underline">
+            Upgrade plan & view AI usage →
+          </Link>
+        ) : null}
+      </section>
+
+      <section className="rounded-2xl border border-border/80 bg-white/80 p-5 space-y-3">
+        <h2 className="font-medium">Change password</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input
+            type="password"
+            placeholder="Current password"
+            value={pw.old_password}
+            onChange={(e) => setPw({ ...pw, old_password: e.target.value })}
+            className="rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none focus-visible:border-ring"
+          />
+          <input
+            type="password"
+            placeholder="New password"
+            value={pw.new_password}
+            onChange={(e) => setPw({ ...pw, new_password: e.target.value })}
+            className="rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none focus-visible:border-ring"
+          />
+        </div>
+        {pwMsg ? <p className="text-sm text-muted-foreground">{pwMsg}</p> : null}
+        <Button size="sm" variant="outline" disabled={!pw.old_password || pw.new_password.length < 8} onClick={() => void changePassword()}>
+          Update password
+        </Button>
       </section>
 
       {can_manage ? (

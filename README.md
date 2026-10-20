@@ -8,7 +8,8 @@ Monorepo for school-scoped teacher notes → parse → chunk → embed → RAG Q
 | [`frontend/`](frontend/) | Vite + React + TypeScript + shadcn/ui |
 | [`docker-compose.yml`](docker-compose.yml) | Postgres + Redis (run from repo root) |
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for VPS / tenancy decisions.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for VPS / tenancy decisions and
+[API.md](API.md) for the API guide (mobile apps should use `/api/v1/`).
 
 ## Quick start
 
@@ -31,6 +32,10 @@ python manage.py seed_pilot
 python manage.py runserver
 # index uploads (macOS: use solo pool to avoid fork crashes)
 OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES celery -A config worker -l info --pool=solo
+# digests, parent weekly email, subscription expiry
+celery -A config beat -l info
+# tests (no external services needed)
+python manage.py test
 ```
 
 - API docs: http://127.0.0.1:8000/api/docs/
@@ -74,6 +79,15 @@ npm_config_cache=../.npm-cache npx --yes shadcn@4.15.0 add card input
 | `/app/mock-tests` | Mock tests — generate, assign, take, scores |
 | `/app/students` | Create student logins + roster (admin/manager/teacher) |
 | `/app/settings` | Plan, join code, account |
+| `/app/question-bank` | Question bank: topics, AI generation, past-paper import, practice tests (staff) |
+| `/app/papers` | Question papers with sections + PDF/Word export and answer key (staff) |
+| `/app/homework` | Homework: assign, photo/text submissions, AI-suggested marks, return |
+| `/app/flashcards` | Flashcard decks + spaced-repetition study |
+| `/app/doubts` | Questions the AI couldn't answer, routed to teachers |
+| `/app/insights` | Weak-topic analytics (students: My Progress; staff: class heatmap + revision tests) |
+| `/app/parents` | Parent logins linked to students (staff) |
+| `/app/billing` | Plans, Razorpay checkout, AI usage & cost (admin/manager) |
+| `/parent` | Parent portal (read-only child overview) |
 
 Django template fallbacks still exist under `/accounts/...` on the API host.
 

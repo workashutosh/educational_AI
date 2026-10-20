@@ -20,6 +20,7 @@
 | `manager` | all in school | yes | yes | yes | yes | yes |
 | `teacher` | granted only | yes | yes | no | no | yes |
 | `student` | granted only | **no** | yes | no | no | no |
+| parent (not a member) | — | — | — | — | — | — (read-only portal for linked children) |
 
 Student logins: `POST /api/admin/students/` (admin/manager/teacher) sets username+password; student signs in at `/api/auth/login/`. Optional `bucket_id` grants access at create time. `School.max_users` (when &gt; 0) caps total active memberships.
 
@@ -66,8 +67,26 @@ Proof endpoint: `POST /api/harness/query/` `{bucket_id, query}`.
 
 Retrieval uses PageIndex tree-search when trees include node text; otherwise embedding `search_bucket` (current indexing path). LLM reuses `GROQ_*` / `PAGEINDEX_MODEL` + `GEMINI_API_KEY` via LiteLLM.
 
+## Feature apps (2026-10)
+
+| App | Owns |
+|---|---|
+| `question_bank` | Topics (from note headings, no LLM), bank questions (dedupe by normalized prompt hash), past-paper import, question papers + PDF/DOCX export |
+| `learning` | Flashcards + SM-2 scheduling, doubts (auto-opened when a student's question isn't in the notes), chat answer feedback |
+| `homework` | Assignments, submissions (text + photos/files, OCR'd with the notes parser), AI-suggested marks, release |
+| `analytics` | Per-topic accuracy from mock tests, quick checks, and flashcards; class heatmap; remediation tests |
+| `school_ops` | Attendance (auto from lecture-room joins), parent accounts + portal |
+| `billing` | Plans (code-defined), Razorpay orders/webhook, usage metering + monthly AI quota |
+
+Decisions:
+
+- **Parents are not `SchoolMembership` rows.** Every existing endpoint gates on `IsSchoolMember`, so a parent account can only reach `/api/parent/…`, which checks `ParentLink`.
+- **Topics come from chunk heading paths** (numbered section, else chapter). Tagging a question = nearest note chunk by embedding, so it costs no LLM tokens.
+- **Metering:** a request/task `usage_scope` plus the shared `llm_provider` records tokens per school. OCR pages and transcription minutes are recorded at their call sites.
+- **pgvector is optional.** Migration `ingestion.0007` adds `embedding_vec vector(384)` + HNSW if the extension can be created. Retrieval uses it when present and falls back to numpy otherwise. `manage.py vector_index --backfill`.
+- **API versioning:** `/api/v1/` mirrors `/api/`. Token auth comes before session auth so a bad token is a 401.
+
 ## Non-goals (pilot)
 
 - Multi-region / S3 (interface ready, not required)
-- pgvector ANN (add when chunk count hurts)
-- Question-paper generation agent (call `run_query` from a separate app later)
+- Push delivery (device tokens are stored; FCM/APNs sending not wired)

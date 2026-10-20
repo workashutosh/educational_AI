@@ -426,6 +426,7 @@ def _parse_pdf(
         if on_progress:
             on_progress(f"0/{page_count} pages")
         ocr_pages = _ocr_via_paddleocr_vl(path, on_progress=on_progress)
+        _meter_ocr(len(ocr_pages))
         parts = [f"<!--PAGE:{i}-->\n{text}" for i, text in enumerate(ocr_pages, start=1)]
         if len(ocr_pages) != page_count:
             logger.warning(
@@ -454,8 +455,19 @@ def _parse_pdf(
     return "\n\n".join(parts), page_count
 
 
+def _meter_ocr(pages: int) -> None:
+    """Bill hosted OCR pages to the school whose upload is being parsed."""
+    try:
+        from billing.services.usage import record_units
+
+        record_units(kind="ocr", units=pages, provider="PaddleOCR-VL")
+    except Exception:
+        logger.debug("OCR metering skipped", exc_info=True)
+
+
 def _parse_image(path: Path) -> str:
     pages = _ocr_via_paddleocr_vl(path)
+    _meter_ocr(len(pages))
     text = (pages[0] if pages else "").strip()
     title = path.stem.replace("_", " ").replace("-", " ")
     body = text or f"# {title}"
@@ -516,10 +528,18 @@ def _parse_pptx(path: Path) -> tuple[str, int]:
 # one layout-parsed markdown page per line (headings already leveled by the
 # model). Runs entirely on AI Studio's infrastructure — no local paddle install.
 _JOB_URL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
-_POLL_INTERVAL_S = 5
+_POLL_INTERVAL_S = 2
 _JOB_TIMEOUT_S = 600
 _UPLOAD_ATTEMPTS = 3
 _UPLOAD_RETRY_BACKOFF_S = 3
+_QUEUE_FULL_ATTEMPTS = 12
+_QUEUE_FULL_BACKOFF_S = 8
+_PADDLEOCR_QUEUE_FULL_CODE = 10010
+# Fewer, denser jobs beat 20 PNG uploads. 5 grayscale JPEG pages stay small
+# enough to upload quickly and usually survive PaddleOCR's page splitter.
+_OCR_CHUNK_PAGES = 5
+_OCR_WHOLE_PDF_MAX_BYTES = 700_000
+_OCR_RENDER_SCALE = 1.45
 
 
 def _paddleocr_vl_headers() -> dict:
@@ -531,26 +551,93 @@ def _paddleocr_vl_headers() -> dict:
     return {"Authorization": f"bearer {token}"}
 
 
+def _paddleocr_error_payload(response) -> dict:
+    try:
+        data = response.json()
+        return data if isinstance(data, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _is_paddleocr_queue_full(response) -> bool:
+    payload = _paddleocr_error_payload(response)
+    if payload.get("code") == _PADDLEOCR_QUEUE_FULL_CODE:
+        return True
+    msg = str(payload.get("msg") or "")
+    return "队列已满" in msg or "queue is full" in msg.lower()
+
+
+def _is_paddleocr_splitter_error(exc: BaseException) -> bool:
+    text = str(exc)
+    return "拆页" in text or "splitter" in text.lower()
+
+
+def _compress_pdf_pages(doc, start: int, end: int, dest: Path, scale: float = _OCR_RENDER_SCALE) -> None:
+    """Rebuild pages as grayscale JPEGs so a 20-page scan is a few MB, not 10."""
+    import fitz
+
+    out = fitz.open()
+    matrix = fitz.Matrix(scale, scale)
+    try:
+        for i in range(start, end):
+            page = doc[i]
+            pix = page.get_pixmap(matrix=matrix, colorspace=fitz.csGRAY, alpha=False)
+            img = pix.tobytes("jpeg", jpg_quality=72)
+            npage = out.new_page(width=page.rect.width, height=page.rect.height)
+            npage.insert_image(npage.rect, stream=img)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        out.save(dest, deflate=True, garbage=4)
+    finally:
+        out.close()
+
+
+def _ocr_pages_from_result(page_texts: list[str], expected: int) -> list[str]:
+    if len(page_texts) >= expected:
+        return page_texts[:expected]
+    if len(page_texts) == 1 and expected > 1:
+        return [page_texts[0]] + [""] * (expected - 1)
+    return page_texts + [""] * (expected - len(page_texts))
+
+
+def _ocr_one_page_jpeg(
+    doc,
+    page_index: int,
+    dest: Path,
+    on_progress: ProgressCallback | None,
+    label: str,
+) -> str:
+    import fitz
+
+    pix = doc[page_index].get_pixmap(
+        matrix=fitz.Matrix(_OCR_RENDER_SCALE, _OCR_RENDER_SCALE),
+        colorspace=fitz.csGRAY,
+        alpha=False,
+    )
+    dest.write_bytes(pix.tobytes("jpeg", jpg_quality=72))
+    page_texts = _ocr_submit_paddleocr_vl_file(
+        dest, on_progress=on_progress, progress_label=label
+    )
+    return page_texts[0] if page_texts else ""
+
+
 def _ocr_via_paddleocr_vl(
     path: Path,
     on_progress: ProgressCallback | None = None,
 ) -> list[str]:
     """
-    Submit a file (PDF or image) to the PaddleOCR-VL hosted API and return one
-    markdown string per extracted page, in order.
+    OCR a scan with as few PaddleOCR-VL jobs as possible.
 
-    Large multi-page scanned PDFs are rendered page-by-page to PNG and submitted
-    individually — full ~10MB PDF uploads time out on slow links, and single-page
-    PDFs can fail PaddleOCR's splitter (系统错误-拆页).
+    Original 8–10MB PDFs time out, and 20 PNG jobs fill the hosted queue.
+    Compress to grayscale JPEG-in-PDF, try the whole file, then 5-page chunks,
+    then a single page only if a chunk hits the splitter error.
     """
     import fitz
 
     suffix = path.suffix.lower()
-    size = path.stat().st_size
-    if suffix != ".pdf" or size <= 1_500_000:
+    if suffix != ".pdf":
         if on_progress:
             on_progress("OCR…")
-        return _ocr_submit_paddleocr_vl_file(path)
+        return _ocr_submit_paddleocr_vl_file(path, on_progress=on_progress)
 
     doc = fitz.open(path)
     try:
@@ -558,42 +645,94 @@ def _ocr_via_paddleocr_vl(
         if page_count <= 1:
             if on_progress:
                 on_progress("1/1 pages")
-            return _ocr_submit_paddleocr_vl_file(path)
+            return _ocr_submit_paddleocr_vl_file(
+                path, on_progress=on_progress, progress_label="1/1 pages"
+            )
 
-        logger.info(
-            "PaddleOCR-VL: OCR %s as %d page images (%d bytes)",
-            path.name,
-            page_count,
-            size,
-        )
-        pages: list[str] = []
         with tempfile.TemporaryDirectory(prefix="paddleocr_pages_") as tmp:
             tmp_dir = Path(tmp)
-            # ~144 DPI — sharp enough for exam papers, small enough to upload.
-            matrix = fitz.Matrix(2, 2)
-            for i in range(page_count):
+            whole = tmp_dir / "all.pdf"
+            _compress_pdf_pages(doc, 0, page_count, whole)
+            whole_size = whole.stat().st_size
+            logger.info(
+                "PaddleOCR-VL: compressed %s to %d bytes (%d pages)",
+                path.name,
+                whole_size,
+                page_count,
+            )
+            if whole_size <= _OCR_WHOLE_PDF_MAX_BYTES:
                 if on_progress:
-                    on_progress(f"{i + 1}/{page_count} pages")
-                page_png = tmp_dir / f"page_{i + 1:04d}.png"
-                pix = doc[i].get_pixmap(matrix=matrix)
-                pix.save(page_png)
-                page_texts = _ocr_submit_paddleocr_vl_file(page_png)
-                if page_texts:
-                    pages.append(page_texts[0] if len(page_texts) == 1 else "\n\n".join(page_texts))
-                else:
-                    pages.append("")
+                    on_progress(f"OCR {page_count} pages…")
+                try:
+                    texts = _ocr_submit_paddleocr_vl_file(
+                        whole,
+                        on_progress=on_progress,
+                        progress_label=f"OCR {page_count} pages",
+                    )
+                    if len(texts) >= max(1, int(page_count * 0.6)):
+                        return _ocr_pages_from_result(texts, page_count)
+                    logger.warning(
+                        "Whole-PDF OCR returned %d/%d pages for %s — using chunks",
+                        len(texts),
+                        page_count,
+                        path.name,
+                    )
+                except RuntimeError as exc:
+                    if not (_is_paddleocr_splitter_error(exc) or _is_paddleocr_queue_full_message(str(exc))):
+                        logger.warning("Whole-PDF OCR failed for %s: %s", path.name, exc)
+                    else:
+                        logger.info("Whole-PDF OCR not usable for %s: %s", path.name, exc)
+
+            pages: list[str] = []
+            for start in range(0, page_count, _OCR_CHUNK_PAGES):
+                end = min(start + _OCR_CHUNK_PAGES, page_count)
+                label = f"{start + 1}–{end}/{page_count} pages"
+                if on_progress:
+                    on_progress(label)
+                chunk = tmp_dir / f"chunk_{start + 1:04d}_{end:04d}.pdf"
+                _compress_pdf_pages(doc, start, end, chunk)
+                try:
+                    texts = _ocr_submit_paddleocr_vl_file(
+                        chunk, on_progress=on_progress, progress_label=label
+                    )
+                    if len(texts) < (end - start) and (end - start) > 1:
+                        raise RuntimeError("拆页")
+                    pages.extend(_ocr_pages_from_result(texts, end - start))
+                except RuntimeError as exc:
+                    if not _is_paddleocr_splitter_error(exc):
+                        raise
+                    logger.warning(
+                        "Chunk %s splitter failed for %s — falling back to pages",
+                        label,
+                        path.name,
+                    )
+                    for i in range(start, end):
+                        one_label = f"{i + 1}/{page_count} pages"
+                        if on_progress:
+                            on_progress(one_label)
+                        jpeg = tmp_dir / f"page_{i + 1:04d}.jpg"
+                        pages.append(
+                            _ocr_one_page_jpeg(doc, i, jpeg, on_progress, one_label)
+                        )
                 logger.info(
-                    "PaddleOCR-VL page %d/%d done for %s",
-                    i + 1,
-                    page_count,
+                    "PaddleOCR-VL %s done for %s",
+                    label,
                     path.name,
                 )
-        return pages
+            return pages
     finally:
         doc.close()
 
 
-def _ocr_submit_paddleocr_vl_file(path: Path) -> list[str]:
+def _is_paddleocr_queue_full_message(text: str) -> bool:
+    return "队列已满" in text or "queue is full" in text.lower() or "10010" in text
+
+
+def _ocr_submit_paddleocr_vl_file(
+    path: Path,
+    on_progress: ProgressCallback | None = None,
+    progress_label: str = "OCR…",
+) -> list[str]:
     """Submit one file (whole PDF or a single-page PDF) and return page markdowns."""
     import requests
 
@@ -604,10 +743,10 @@ def _ocr_submit_paddleocr_vl_file(path: Path) -> list[str]:
         "useChartRecognition": False,
     }
 
-    # A single dropped connection would otherwise discard a whole multi-page job.
     response = None
     last_exc: Exception | None = None
-    for attempt in range(_UPLOAD_ATTEMPTS):
+    max_attempts = max(_UPLOAD_ATTEMPTS, _QUEUE_FULL_ATTEMPTS)
+    for attempt in range(max_attempts):
         try:
             with open(path, "rb") as f:
                 files = {"file": (path.name, f)}
@@ -617,20 +756,56 @@ def _ocr_submit_paddleocr_vl_file(path: Path) -> list[str]:
                     headers=_paddleocr_vl_headers(),
                     data=data,
                     files=files,
-                    timeout=600,
+                    timeout=180,
                 )
-            break
         except requests.RequestException as exc:
             last_exc = exc
             logger.warning(
                 "PaddleOCR-VL upload failed for %s (attempt %d/%d): %s",
                 path.name,
                 attempt + 1,
-                _UPLOAD_ATTEMPTS,
+                max_attempts,
                 exc,
             )
             if attempt + 1 < _UPLOAD_ATTEMPTS:
                 time.sleep(_UPLOAD_RETRY_BACKOFF_S * (attempt + 1))
+                continue
+            break
+
+        if response.status_code == 200:
+            break
+
+        queue_full = _is_paddleocr_queue_full(response)
+        if queue_full and attempt + 1 < _QUEUE_FULL_ATTEMPTS:
+            wait = min(15 * (attempt + 1), 45)
+            logger.warning(
+                "PaddleOCR-VL queue full for %s (attempt %d/%d); retrying in %ss",
+                path.name,
+                attempt + 1,
+                _QUEUE_FULL_ATTEMPTS,
+                wait,
+            )
+            if on_progress:
+                on_progress(f"{progress_label} · OCR busy, retrying…")
+            time.sleep(wait)
+            continue
+
+        if response.status_code in (429, 502, 503, 504) and attempt + 1 < max_attempts:
+            wait = _UPLOAD_RETRY_BACKOFF_S * (attempt + 1)
+            logger.warning(
+                "PaddleOCR-VL HTTP %s for %s (attempt %d/%d); retrying in %ss",
+                response.status_code,
+                path.name,
+                attempt + 1,
+                max_attempts,
+                wait,
+            )
+            time.sleep(wait)
+            continue
+
+        raise RuntimeError(
+            f"PaddleOCR-VL job submission failed ({response.status_code}): {response.text}"
+        )
 
     if response is None:
         raise RuntimeError(
@@ -639,16 +814,24 @@ def _ocr_submit_paddleocr_vl_file(path: Path) -> list[str]:
         ) from last_exc
     if response.status_code != 200:
         raise RuntimeError(
-            f"PaddleOCR-VL job submission failed ({response.status_code}): {response.text}"
+            "The OCR service is busy right now. Wait a minute and try again."
+            if _is_paddleocr_queue_full(response)
+            else f"PaddleOCR-VL job submission failed ({response.status_code}): {response.text}"
         )
     job_id = response.json()["data"]["jobId"]
     logger.info("PaddleOCR-VL job submitted for %s (job_id=%s)", path.name, job_id)
 
-    jsonl_url = _poll_paddleocr_vl_job(job_id)
+    jsonl_url = _poll_paddleocr_vl_job(
+        job_id, on_progress=on_progress, progress_label=progress_label
+    )
     return _download_paddleocr_vl_pages(jsonl_url)
 
 
-def _poll_paddleocr_vl_job(job_id: str) -> str:
+def _poll_paddleocr_vl_job(
+    job_id: str,
+    on_progress: ProgressCallback | None = None,
+    progress_label: str = "OCR…",
+) -> str:
     import requests
 
     deadline = time.monotonic() + _JOB_TIMEOUT_S
@@ -668,6 +851,8 @@ def _poll_paddleocr_vl_job(job_id: str) -> str:
         if state == "failed":
             raise RuntimeError(f"PaddleOCR-VL job failed: {data.get('errorMsg')}")
 
+        if on_progress and state:
+            on_progress(f"{progress_label} · {state}")
         logger.info("PaddleOCR-VL job %s: %s", job_id, state)
         time.sleep(_POLL_INTERVAL_S)
 
@@ -681,7 +866,10 @@ def _download_paddleocr_vl_pages(jsonl_url: str) -> list[str]:
     resp.raise_for_status()
 
     pages: list[str] = []
-    for line in resp.text.strip().splitlines():
+    # The result file is served without a charset, and requests' fallback guess
+    # decodes 0x5C as ¥, which corrupts every JSON escape sequence in the
+    # markdown. Decode as UTF-8 explicitly instead of trusting resp.text.
+    for line in resp.content.decode("utf-8").strip().splitlines():
         line = line.strip()
         if not line:
             continue

@@ -21,6 +21,21 @@ urlpatterns = [
     path("<int:pk>/go-live/", views.LectureGoLiveView.as_view(), name="lecture-go-live"),
     path("<int:pk>/end/", views.LectureEndView.as_view(), name="lecture-end"),
     path(
+        "<int:pk>/recordings/",
+        views.LectureRecordingListCreateView.as_view(),
+        name="lecture-recordings",
+    ),
+    path(
+        "recordings/<int:rec_id>/",
+        views.LectureRecordingDetailView.as_view(),
+        name="lecture-recording-detail",
+    ),
+    path(
+        "recordings/<int:rec_id>/audio/",
+        views.LectureRecordingAudioView.as_view(),
+        name="lecture-recording-audio",
+    ),
+    path(
         "<int:pk>/create-teams/",
         views.LectureCreateTeamsView.as_view(),
         name="lecture-create-teams",

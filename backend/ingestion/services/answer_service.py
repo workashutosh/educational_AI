@@ -101,13 +101,17 @@ def answer_question(
     question: str,
     top_k: int | None = None,
     history: list[dict] | None = None,
+    language: str | None = None,
 ) -> GeneratedAnswer:
+    from .language_service import retrieval_query_in_english
+
     cfg = get_chat_llm()
     model = cfg.model
     history = _normalize_history(history or [])
 
-    syllabus_hint = _resolve_syllabus_topic(bucket_id, question, history)
-    retrieval_query = _retrieval_query(question, history, syllabus_hint=syllabus_hint)
+    search_question = retrieval_query_in_english(question)
+    syllabus_hint = _resolve_syllabus_topic(bucket_id, search_question, history)
+    retrieval_query = _retrieval_query(search_question, history, syllabus_hint=syllabus_hint)
     # Chat/ask uses teaching notes; previous-year papers are for mock tests.
     if top_k is None:
         top_k = int(getattr(settings, "RAG_TOP_K", 5) or 5)
@@ -155,6 +159,7 @@ def answer_question(
         chunks=context_chunks,
         syllabus_hint=syllabus_hint,
         question=question,
+        language=language,
     )
     return GeneratedAnswer(
         answer=answer_text,
@@ -253,8 +258,12 @@ def _call_chat_llm(
     chunks: list[RetrievedChunk],
     syllabus_hint: str | None,
     question: str,
+    language: str | None = None,
 ) -> str:
+    from .language_service import answer_instruction
+
     cfg = get_chat_llm()
+    system_prompt = _SYSTEM_PROMPT + answer_instruction(language)
 
     def build_messages(use_chunks: list[RetrievedChunk]) -> list[dict]:
         context = "\n\n".join(
@@ -270,7 +279,7 @@ def _call_chat_llm(
             f"Excerpts for this turn:\n\n{context}{hint_line}\n\n"
             f"Current question: {question}"
         )
-        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        messages = [{"role": "system", "content": system_prompt}]
         messages.extend(history)
         messages.append({"role": "user", "content": current_user})
         return messages

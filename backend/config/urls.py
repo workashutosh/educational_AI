@@ -13,6 +13,23 @@ from ingestion.auth_views import (
     register_school_view,
 )
 from ingestion.views import ask_test_page
+from school_ops import urls_parents
+
+api_patterns = [
+    path("", include("ingestion.urls")),
+    path("harness/", include("rag_harness.urls")),
+    path("mock-tests/", include("mock_tests.urls")),
+    path("lectures/", include("lectures.urls")),
+    path("engagement/", include("engagement.urls")),
+    path("question-bank/", include("question_bank.urls")),
+    path("learning/", include("learning.urls")),
+    path("homework/", include("homework.urls")),
+    path("analytics/", include("analytics.urls")),
+    path("attendance/", include("school_ops.urls_attendance")),
+    path("parents/", include(urls_parents.manage_urlpatterns)),
+    path("parent/", include(urls_parents.portal_urlpatterns)),
+    path("billing/", include("billing.urls")),
+]
 
 urlpatterns = [
     path("", app_home, name="root"),
@@ -24,11 +41,9 @@ urlpatterns = [
     path("accounts/onboarding/", onboarding_needed, name="onboarding_needed"),
     path("admin/", admin.site.urls),
     path("ask-test/", ask_test_page, name="ask-test"),
-    path("api/", include("ingestion.urls")),
-    path("api/harness/", include("rag_harness.urls")),
-    path("api/mock-tests/", include("mock_tests.urls")),
-    path("api/lectures/", include("lectures.urls")),
-    path("api/engagement/", include("engagement.urls")),
+    path("api/", include(api_patterns)),
+    # Stable, versioned mirror for mobile apps (same views, same auth).
+    path("api/v1/", include((api_patterns, "v1"))),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
 ]

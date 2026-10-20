@@ -161,7 +161,7 @@ export function MockTestDetailPage() {
   const assignedIds = new Set((test.assignments || []).map((a) => a.student_id))
   const grantable = allStudents.filter((s) => !assignedIds.has(s.id))
 
-  async function assignSelected(publishAfter = test.status === "draft") {
+  async function assignSelected(publishAfter = test?.status === "draft") {
     if (!selected.size) return
     setBusy(true)
     setError("")
@@ -197,7 +197,7 @@ export function MockTestDetailPage() {
   }
 
   async function publish() {
-    if (test.assigned_count < 1) {
+    if ((test?.assigned_count ?? 0) < 1) {
       setError("Select at least one student on the Students tab before publishing.")
       setTab("students")
       return

@@ -80,9 +80,11 @@ def _post_chat(
     last_exc: Exception | None = None
     for attempt in range(max(1, attempts)):
         try:
-            return requests.post(
+            response = requests.post(
                 cfg.chat_url, headers=headers, json=payload, timeout=timeout
             )
+            _meter(cfg, payload, response)
+            return response
         except requests.RequestException as exc:
             last_exc = exc
             logger.warning(
@@ -97,6 +99,34 @@ def _post_chat(
     raise LLMProviderError(
         0, raw=str(last_exc), provider=cfg.provider
     ) from last_exc
+
+
+def _meter(cfg: ChatLLMConfig, payload: dict, response: requests.Response) -> None:
+    """Record token usage for billing; never raises."""
+    if response.status_code != 200:
+        return
+    try:
+        from billing.services.usage import record_llm_usage
+
+        record_llm_usage(
+            provider=cfg.provider,
+            model=payload.get("model") or cfg.model,
+            usage=(response.json() or {}).get("usage"),
+        )
+    except Exception:
+        logger.debug("usage metering skipped", exc_info=True)
+
+
+def _check_quota() -> None:
+    """Block calls once the school's monthly AI allowance is spent."""
+    from billing.services.usage import AIQuotaExceeded, check_ai_quota
+
+    try:
+        check_ai_quota()
+    except AIQuotaExceeded as exc:
+        raise LLMProviderError(
+            429, public_message=exc.public_message, provider="quota"
+        ) from exc
 
 
 def _apply_thinking(cfg: ChatLLMConfig, payload: dict) -> None:
@@ -149,6 +179,7 @@ def chat_completion(
     Raises LLMProviderError / RuntimeError on failure.
     """
     cfg = get_chat_llm()
+    _check_quota()
     payload: dict = {
         "model": model or cfg.model,
         "messages": messages,
@@ -185,6 +216,7 @@ def chat_completion_raw(
     status-based shrink/retry (e.g. answer_service TPM handling).
     """
     cfg = get_chat_llm()
+    _check_quota()
     payload: dict = {
         "model": cfg.model,
         "messages": messages,

@@ -53,10 +53,17 @@ from .serializers import (
     QueryRequestSerializer,
     SubjectBucketCreateSerializer,
     SubjectBucketSerializer,
+    TranslateRequestSerializer,
 )
 
 from .services import find_indexed_duplicate, sha256_of_uploaded_file
 from .services.answer_service import answer_question
+from .services.language_service import (
+    NOT_FOUND_EN,
+    SUPPORTED_LANGUAGES,
+    normalize_language,
+    translate_text,
+)
 from .services.llm_errors import LLMProviderError, http_status_for_llm_error, public_llm_message
 from .services.page_image_service import render_document_page
 from .services.pptx_service import (
@@ -353,10 +360,15 @@ class AskView(APIView):
         question = serializer.validated_data["query"]
         history = serializer.validated_data.get("history") or []
         session_id = serializer.validated_data.get("session_id")
+        language = serializer.validated_data.get("language") or ""
 
         try:
             result = answer_question(
-                bucket.id, question=question, top_k=top_k, history=history
+                bucket.id,
+                question=question,
+                top_k=top_k,
+                history=history,
+                language=language,
             )
         except LLMProviderError as exc:
             return Response(
@@ -391,6 +403,7 @@ class AskView(APIView):
             )
 
         session_payload = None
+        assistant_message = None
         member = getattr(request, "member", None) or get_membership(request.user)
         if member and session_id:
             session = get_object_or_404(
@@ -399,7 +412,7 @@ class AskView(APIView):
             ChatMessage.objects.create(
                 session=session, role=ChatMessage.ROLE_USER, content=question
             )
-            ChatMessage.objects.create(
+            assistant_message = ChatMessage.objects.create(
                 session=session,
                 role=ChatMessage.ROLE_ASSISTANT,
                 content=result.answer,
@@ -444,6 +457,8 @@ class AskView(APIView):
             except Exception:
                 suggestions = []
 
+        doubt_id = _auto_escalate(member, bucket, question, result.answer, assistant_message)
+
         return Response(
             {
                 "question": question,
@@ -454,8 +469,69 @@ class AskView(APIView):
                 "sources": sources,
                 "session": session_payload,
                 "suggestions": suggestions,
+                # Use with POST /api/learning/feedback/ (only when session_id was sent).
+                "message_id": assistant_message.id if assistant_message else None,
+                "language": normalize_language(language),
+                # Set when a student's unanswered question was routed to teachers.
+                "doubt_id": doubt_id,
             }
         )
+
+
+def _auto_escalate(member, bucket, question, answer, message) -> int | None:
+    """Route a student's 'not in the notes' question to the subject teachers."""
+    if member is None or member.role != SchoolMembership.ROLE_STUDENT:
+        return None
+    if not (answer or "").strip().startswith(NOT_FOUND_EN):
+        return None
+    try:
+        from learning.models import Doubt
+        from learning.services.content import open_doubt
+
+        doubt, _ = open_doubt(
+            student=member,
+            bucket=bucket,
+            question=question,
+            reason=Doubt.REASON_NO_ANSWER,
+            ai_answer=answer,
+            chat_message=message,
+        )
+        return doubt.id
+    except Exception:
+        logger.exception("auto doubt escalation failed")
+        return None
+
+
+class LanguageListView(APIView):
+    """GET /api/languages/ — languages accepted by /api/ask/ and /api/translate/."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response(
+            [{"code": code, "name": name} for code, name in SUPPORTED_LANGUAGES.items()]
+        )
+
+
+class TranslateView(APIView):
+    """POST /api/translate/ {text, target_language} — translate an answer or note excerpt."""
+
+    permission_classes = [IsSchoolMember]
+
+    def post(self, request):
+        serializer = TranslateRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        target = normalize_language(serializer.validated_data["target_language"])
+        try:
+            text = translate_text(serializer.validated_data["text"], target)
+        except LLMProviderError as exc:
+            return Response(
+                {"detail": exc.public_message}, status=http_status_for_llm_error(exc)
+            )
+        except RuntimeError:
+            logger.exception("TranslateView failure")
+            return Response({"detail": public_llm_message(502)}, status=502)
+        return Response({"text": text, "target_language": target})
 
 
 class GeneratePptxView(APIView):
@@ -991,3 +1067,55 @@ class AdminBucketAccessListView(APIView):
             "member__user", "granted_by"
         )
         return Response(BucketAccessSerializer(grants, many=True).data)
+
+
+class SpeechTranscribeView(APIView):
+    """
+    POST /api/speech/transcribe/ (multipart: audio, language?) — voice question → text.
+
+    Clients record with MediaRecorder (webm/ogg) or native audio (m4a) and put
+    the returned text into the chat box (or straight into /api/ask/).
+    """
+
+    permission_classes = [IsSchoolMember]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        import tempfile
+        from pathlib import Path
+
+        from .services.speech_service import (
+            AUDIO_EXTS,
+            TranscriptionError,
+            max_upload_bytes,
+            transcribe_file,
+        )
+
+        audio = request.FILES.get("audio") or request.FILES.get("file")
+        if audio is None:
+            return Response({"detail": "Attach an audio file as 'audio'."}, status=400)
+        limit = min(max_upload_bytes(), 10 * 1024 * 1024)
+        if audio.size > limit:
+            return Response(
+                {"detail": "Voice messages must be under 10 MB (about 10 minutes)."},
+                status=400,
+            )
+        suffix = Path(audio.name or "voice.webm").suffix.lower() or ".webm"
+        if suffix not in AUDIO_EXTS:
+            suffix = ".webm"
+        language = request.data.get("language") or None
+        with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+            for chunk in audio.chunks():
+                tmp.write(chunk)
+            tmp.flush()
+            try:
+                result = transcribe_file(tmp.name, language=language)
+            except TranscriptionError as exc:
+                return Response({"detail": str(exc)}, status=400)
+        return Response(
+            {
+                "text": result.text,
+                "language": result.language,
+                "duration_seconds": result.duration_seconds,
+            }
+        )

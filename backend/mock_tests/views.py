@@ -3,6 +3,7 @@ Mock test APIs: blueprint generate, assign, publish, take, score, brief confirm.
 """
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
@@ -37,6 +38,7 @@ from .services import (
 )
 
 # Grace period after ends_at before rejecting late submits
+logger = logging.getLogger(__name__)
 _SUBMIT_GRACE = timedelta(seconds=30)
 
 
@@ -56,6 +58,16 @@ def _is_assigned(member: SchoolMembership, test: MockTest) -> bool:
     return MockAssignment.objects.filter(test=test, student=member).exists()
 
 
+def _queue_bank_sync(test_id: int) -> None:
+    """Copy generated questions into the question bank and tag their topics."""
+    try:
+        from question_bank.tasks import sync_mock_test_task
+
+        sync_mock_test_task.delay(test_id)
+    except Exception:
+        logger.exception("Could not queue question-bank sync for mock %s", test_id)
+
+
 def _question_payload(q: MockQuestion, *, reveal_correct: bool) -> dict:
     data = {
         "id": q.id,
@@ -65,6 +77,9 @@ def _question_payload(q: MockQuestion, *, reveal_correct: bool) -> dict:
         "options": q.options,
         "marks": q.marks,
     }
+    if reveal_correct:
+        data["topic_id"] = q.topic_id
+        data["topic_name"] = q.topic.name if q.topic_id else None
     if reveal_correct:
         data["correct_indices"] = q.correct_indices
         if q.qtype == MockQuestion.TYPE_BRIEF:
@@ -299,6 +314,7 @@ class MockTestListCreateView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         test = MockTest.objects.select_related("bucket").get(pk=test.pk)
+        _queue_bank_sync(test.id)
         try:
             from engagement.models import TeacherImpactEvent
             from engagement.services.impact import record_impact
@@ -432,6 +448,7 @@ class MockTestRegenerateView(APIView):
         except MockTestGenerationError as exc:
             return Response({"detail": str(exc)}, status=400)
         test = MockTest.objects.select_related("bucket").get(pk=pk)
+        _queue_bank_sync(test.id)
         return Response(_test_detail(test, member))
 
 
@@ -1022,6 +1039,10 @@ class MockTestReleaseResultsView(APIView):
                 "email_failed": email_failed,
             }
         )
+
+
+class MockTestReleaseStudentResultsView(MockTestReleaseResultsView):
+    """POST …/results/<student_id>/release/ — release one student's result."""
 
 
 class MockTestConfirmBriefView(APIView):

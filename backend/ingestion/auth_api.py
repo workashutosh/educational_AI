@@ -59,8 +59,21 @@ def _member_payload(user: User, token_key: str | None = None) -> dict:
     }
     if token_key:
         payload["token"] = token_key
+    # member | parent | none — lets mobile/web route to the right home screen.
+    payload["account_type"] = "member" if member else "none"
+    payload["parent"] = None
 
     if member is None or school is None:
+        try:
+            from school_ops.services import parent_payload, parent_profile_for
+
+            profile = parent_profile_for(user)
+        except Exception:
+            profile = None
+        if profile is not None:
+            payload["account_type"] = "parent"
+            payload["parent"] = parent_payload(profile)
+            payload["school"] = {"id": profile.school_id, "name": profile.school.name}
         return payload
 
     buckets = list(
@@ -624,6 +637,30 @@ class AuthMeView(APIView):
 
     def get(self, request):
         token, _ = Token.objects.get_or_create(user=request.user)
+        return Response(_member_payload(request.user, token.key))
+
+
+class AuthChangePasswordView(APIView):
+    """POST {old_password, new_password} — rotates the API token (other devices sign out)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+
+        old = request.data.get("old_password") or ""
+        new = request.data.get("new_password") or ""
+        if not request.user.check_password(old):
+            return Response({"detail": "Current password is incorrect."}, status=400)
+        try:
+            validate_password(new, request.user)
+        except ValidationError as exc:
+            return Response({"detail": " ".join(exc.messages)}, status=400)
+        request.user.set_password(new)
+        request.user.save(update_fields=["password"])
+        Token.objects.filter(user=request.user).delete()
+        token = Token.objects.create(user=request.user)
         return Response(_member_payload(request.user, token.key))
 
 

@@ -23,6 +23,11 @@ staticfiles/
 .env
 .env.local
 .env.*.local
+*.key
+*.pem
+
+# Deploy artifacts
+classkit-deploy.tar.gz
 
 # IDE
 .idea/

@@ -65,6 +65,10 @@ export type AskSource = {
 
 export type ChatMessage = {
   id?: number
+  /** Assistant message id for /api/learning/feedback/ */
+  message_id?: number | null
+  doubt_id?: number | null
+  feedback?: 1 | -1 | null
   role: "user" | "assistant"
   content: string
   sources?: AskSource[]
@@ -104,9 +108,25 @@ export type AccessGrant = {
   granted_at: string
 }
 
+export type ParentChild = {
+  student_id: number
+  name: string
+  relationship: string
+}
+
+export type ParentInfo = {
+  id: number
+  phone: string
+  weekly_email: boolean
+  children: ParentChild[]
+}
+
 export type Session = {
   token: string
   user: AuthUser
+  /** member = school staff/student, parent = parent portal account */
+  account_type?: "member" | "parent" | "none"
+  parent?: ParentInfo | null
   membership: Membership | null
   school: School | null
   buckets: Bucket[]
@@ -227,10 +247,14 @@ export async function api<T>(
 }
 
 /** Multipart upload — do not set Content-Type (browser sets boundary). */
-export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+export async function apiUpload<T>(
+  path: string,
+  form: FormData,
+  method: "POST" | "PATCH" | "PUT" = "POST",
+): Promise<T> {
   const auth = getToken()
   const res = await fetch(path, {
-    method: "POST",
+    method,
     headers: {
       ...(auth ? { Authorization: `Token ${auth}` } : {}),
     },
@@ -323,4 +347,54 @@ export function statusLabel(status: string, progressMessage?: string | null): st
 
 export function isPendingStatus(status: string): boolean {
   return ["queued", "parsing", "indexing"].includes(status)
+}
+
+/** Paginated list shape used by large collections (?limit=&offset=). */
+export type Page<T> = {
+  count: number
+  limit: number
+  offset: number
+  next_offset: number | null
+  results: T[]
+}
+
+/** Download an authenticated file (export, attachment) and save it. */
+export async function downloadFile(path: string, fallbackName = "download") {
+  const auth = getToken()
+  const res = await fetch(path, {
+    headers: auth ? { Authorization: `Token ${auth}` } : {},
+  })
+  if (!res.ok) {
+    let data: unknown = null
+    try {
+      data = await res.json()
+    } catch {
+      data = null
+    }
+    throw parseError(data, res.status)
+  }
+  const blob = await res.blob()
+  const disposition = res.headers.get("Content-Disposition") || ""
+  const match = /filename="?([^";]+)"?/i.exec(disposition)
+  triggerBlobDownload(blob, match?.[1]?.trim() || fallbackName)
+}
+
+/** Fetch an authenticated file as an object URL (audio players, image previews). */
+export async function fetchObjectUrl(path: string): Promise<string> {
+  const auth = getToken()
+  const res = await fetch(path, { headers: auth ? { Authorization: `Token ${auth}` } : {} })
+  if (!res.ok) throw parseError(null, res.status)
+  return URL.createObjectURL(await res.blob())
+}
+
+export function errorMessage(err: unknown, fallback = "Something went wrong"): string {
+  return err instanceof Error ? err.message : fallback
+}
+
+export function formatDate(value: string | null | undefined, withTime = false): string {
+  if (!value) return "—"
+  const d = new Date(value)
+  return withTime
+    ? d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
 }

@@ -121,6 +121,21 @@ class MockQuestion(models.Model):
     correct_indices = models.JSONField(default=list, blank=True)
     model_answer = models.TextField(blank=True, default="")
     marks = models.PositiveIntegerField(default=1)
+    # Topic tag (drives weak-topic analytics) and the bank row it came from.
+    topic = models.ForeignKey(
+        "question_bank.Topic",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mock_questions",
+    )
+    bank_item = models.ForeignKey(
+        "question_bank.QuestionItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mock_questions",
+    )
 
     class Meta:
         ordering = ["order", "id"]

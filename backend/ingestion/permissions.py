@@ -12,6 +12,12 @@ def get_membership(user) -> SchoolMembership | None:
         return None
     if not membership.is_active:
         return None
+    try:
+        from billing.services.usage import bind_member
+
+        bind_member(membership)
+    except Exception:
+        pass
     return membership
 
 
@@ -153,6 +159,20 @@ class IsManagerOrAdmin(BasePermission):
     def has_permission(self, request, view):
         member = get_membership(request.user)
         if member is None or not member.is_manager_or_above:
+            return False
+        request.member = member
+        request.teacher = member
+        return True
+
+
+class IsStaffMember(BasePermission):
+    """Admin, manager, or teacher — anyone who teaches (not students)."""
+
+    message = "Only teachers, managers, and admins can do this."
+
+    def has_permission(self, request, view):
+        member = get_membership(request.user)
+        if member is None or member.role == SchoolMembership.ROLE_STUDENT:
             return False
         request.member = member
         request.teacher = member

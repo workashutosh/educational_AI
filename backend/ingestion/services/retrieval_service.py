@@ -10,11 +10,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+import logging
+
 import numpy as np
 from django.conf import settings
+from django.db.models import Q
 
 from ..models import Chunk, Document
 from .embedding_service import embed_query
+from .vector_store import nearest_chunk_ids, pgvector_available
+
+logger = logging.getLogger(__name__)
 
 _ANSWER_KEY_FILE = re.compile(r"(?:^|[_-])an\.pdf$|(?:answers?|solutions?)\.pdf$", re.I)
 _TOC_HEADING = re.compile(r"\b(contents|preface|foreword|answers?)\b", re.I)
@@ -57,33 +63,37 @@ def search_bucket(
         qs = qs.filter(document__kind__in=kinds)
     if document_ids:
         qs = qs.filter(document_id__in=document_ids)
-    rows = list(
-        qs.values(
-            "id",
-            "document_id",
-            "document__original_filename",
-            "heading_path",
-            "page_start",
-            "page_end",
-            "text",
-            "embedding",
-            "order_index",
-        )
+    fields = (
+        "id",
+        "document_id",
+        "document__original_filename",
+        "heading_path",
+        "page_start",
+        "page_end",
+        "text",
+        "order_index",
     )
-    if not rows:
-        return []
+    query_vec = embed_query(query)
+    pool_size = max(top_k * 6, top_k)
 
-    matrix = np.array([row["embedding"] for row in rows], dtype=np.float32)
-    query_vec = np.array(embed_query(query), dtype=np.float32)
+    ann = _ann_candidates(qs, bucket_id, query_vec, pool_size, fields, kinds, document_ids)
+    if ann is not None:
+        rows, scores, candidates = ann
+    else:
+        rows = list(qs.values(*fields, "embedding"))
+        if not rows:
+            return []
+        matrix = np.array([row["embedding"] for row in rows], dtype=np.float32)
+        query_np = np.array(query_vec, dtype=np.float32)
 
-    norms = np.linalg.norm(matrix, axis=1)
-    norms[norms == 0] = 1.0
-    query_norm = np.linalg.norm(query_vec) or 1.0
+        norms = np.linalg.norm(matrix, axis=1)
+        norms[norms == 0] = 1.0
+        query_norm = np.linalg.norm(query_np) or 1.0
 
-    scores = (matrix @ query_vec) / (norms * query_norm)
+        scores = (matrix @ query_np) / (norms * query_norm)
 
-    pool = min(max(top_k * 6, top_k), len(rows))
-    candidates = np.argpartition(-scores, pool - 1)[:pool]
+        pool = min(pool_size, len(rows))
+        candidates = np.argpartition(-scores, pool - 1)[:pool]
 
     ranked: list[tuple[float, int]] = []
     query_terms = _lexical_terms(query)
@@ -149,6 +159,40 @@ def search_bucket(
     out.sort(key=lambda c: -c.score)
     # Neighbor expansion can inflate the list — answer path must stay small for LLM TPM.
     return out[:top_k]
+
+
+def _ann_candidates(qs, bucket_id, query_vec, pool_size, fields, kinds, document_ids):
+    """
+    pgvector path: nearest candidates + their ±1 neighbours. Returns
+    (rows, scores, candidate_indices) or None to use brute-force numpy.
+    """
+    if not pgvector_available():
+        return None
+    try:
+        hits = nearest_chunk_ids(
+            bucket_id, query_vec, pool_size, kinds=kinds, document_ids=document_ids
+        )
+    except Exception:
+        logger.warning("pgvector search failed; using brute force", exc_info=True)
+        return None
+    if len(hits) < pool_size and len(hits) < qs.count():
+        # Filtered HNSW under-filled (or vectors not backfilled yet).
+        return None
+    score_by_id = dict(hits)
+    rows = list(qs.filter(id__in=list(score_by_id)).values(*fields))
+    if not rows:
+        return [], [], []
+    wanted = Q()
+    for row in rows:
+        wanted |= Q(
+            document_id=row["document_id"],
+            order_index__in=[row["order_index"] - 1, row["order_index"] + 1],
+        )
+    have = {row["id"] for row in rows}
+    neighbours = [r for r in qs.filter(wanted).values(*fields) if r["id"] not in have]
+    candidates = list(range(len(rows)))
+    scores = [score_by_id[row["id"]] for row in rows] + [0.0] * len(neighbours)
+    return rows + neighbours, scores, candidates
 
 
 def _quality_multiplier(row: dict) -> float:
